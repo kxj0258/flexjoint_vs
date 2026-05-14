@@ -15,6 +15,11 @@ public:
         int   hough_param2   = 38;
         int   hough_min_rad  = 3;
         int   hough_max_rad  = 80;
+        double hough_dp       = 1.0;
+        double hough_min_dist = 30.0;
+        int   blur_kernel    = 7;
+        double blur_sigma     = 2.0;
+        bool  equalize_hist   = false;
         float desired[6]     = {264.5f, 96.5f, 298.5f, 166.5f, 174.5f, 144.5f};
         std::string save_path = "data/frames/";
     };

@@ -7,8 +7,8 @@ serial:
   baud_rate: 115200
 
 camera:
-  index: 0
-  fps: 110
+  index: 2
+  fps: 120
   width: 640
   height: 480
 
@@ -35,10 +35,25 @@ control:
 vision:
   desired_coords: [264.5, 96.5, 298.5, 166.5, 174.5, 144.5]
   save_path: "data/frames/"
+  hough_dp: 1.0
+  hough_min_dist: 30.0
   hough_param1: 100
   hough_param2: 38
   hough_min_radius: 3
   hough_max_radius: 80
+  blur_kernel: 7
+  blur_sigma: 2.0
+  equalize_hist: false
+
+motor_protocol:
+  # Existing controller code uses this command for velocity frames.
+  velocity_command: 0x54
+  # Set these after confirming your motor controller protocol. The motor_test
+  # tool enables pos/pid commands when the command byte is 0..255.
+  position_command: -1
+  pid_command: -1
+  position_counts_per_rev: 16384
+  pid_scale: 1000
 
 robot:
   L: 0.3

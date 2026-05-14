@@ -14,11 +14,20 @@ flexjoint_vs/
 ├── include/
 │   ├── serial_port.hpp         # 串口类声明
 │   ├── modbus_crc.hpp          # Modbus CRC 工具函数声明
+│   ├── app_config.hpp          # YAML 配置加载
+│   ├── feature_detection.hpp   # 圆形特征检测公共函数
+│   ├── motor_client.hpp        # 电机命令/反馈封装
 │   ├── kinematics.hpp          # 雅可比矩阵计算函数声明
 │   ├── controller.hpp          # 控制器函数及参数结构体声明
 │   └── vision.hpp              # 视觉特征提取类声明
 ├── src/
 │   ├── main.cpp                # 主程序：初始化、控制主循环
+│   ├── camera_feature_test.cpp # 摄像头实时检测与交互调参
+│   ├── camera_calibration.cpp  # 棋盘格相机内参/外参标定
+│   ├── motor_test.cpp          # 电机交互测试程序
+│   ├── app_config.cpp          # 配置加载实现
+│   ├── feature_detection.cpp   # Hough 圆检测实现
+│   ├── motor_client.cpp        # 电机帧构造与反馈解码
 │   ├── serial_port_posix.cpp   # Ubuntu/Linux 串口实现（termios）
 │   ├── serial_port_win32.cpp   # Windows 串口实现（CreateFile/DCB）
 │   ├── modbus_crc.cpp          # CRC-16/MODBUS 校验及速度编码
@@ -26,7 +35,8 @@ flexjoint_vs/
 │   ├── controller.cpp          # 双层视觉伺服控制器 + PD 备用控制器
 │   └── vision.cpp              # 摄像头采集与 Hough 圆检测
 └── data/
-    └── .gitkeep                # 运行时保存图像帧的目录
+    └── frames/
+        └── .gitkeep            # 运行时保存图像帧的目录
 ```
 
 ---
@@ -86,7 +96,12 @@ cmake ..
 make -j4
 ```
 
-编译成功后生成可执行文件 `build/flexjoint_vs`。
+编译成功后生成：
+
+- `build/flexjoint_vs`：视觉伺服主程序
+- `build/camera_feature_test`：摄像头实时检测/调参程序
+- `build/camera_calibration`：相机内参/外参标定程序
+- `build/motor_test`：电机交互测试程序
 
 ### Windows
 
@@ -98,7 +113,7 @@ cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.c
 cmake --build build --config Release
 ```
 
-编译成功后生成可执行文件 `build\Release\flexjoint_vs.exe`。如果使用单配置生成器（如 Ninja），可执行文件通常位于 `build\flexjoint_vs.exe`。
+编译成功后会生成 `flexjoint_vs.exe`、`camera_feature_test.exe`、`camera_calibration.exe`、`motor_test.exe`。Visual Studio 多配置生成器通常位于 `build\Release\`；Ninja 等单配置生成器通常位于 `build\`。
 
 ---
 
@@ -122,6 +137,85 @@ cmake --build build --config Release
 ```
 
 按 `Ctrl+C` 可安全退出，程序会在退出前刷新日志文件。
+
+### 摄像头实时检测与交互调参
+
+```bash
+cd build
+./camera_feature_test ../config/robot_config.yaml
+```
+
+主窗口提供 `dp x10`、`min_dist`、`param1`、`param2`、`min_radius`、`max_radius`、`blur`、`sigma x10`、`equalize` 等 trackbar，可实时优化 Hough 圆检测。Linux 下还会打开 `camera_controls` 窗口，自动列出 V4L2 暴露的可写控制项，例如亮度、对比度、饱和度、白平衡、gamma、gain、sharpness、曝光等。终端会周期性打印三枚特征圆的图像坐标和半径，输出顺序与主控制器一致：中等半径、最大半径、最小半径。
+
+可用 `--video` 指定录制输出文件；不指定时，按 `v` 开始录制会自动生成 `data/videos/camera_feature_test_YYYYmmdd_HHMMSS.mp4`。录制内容为当前带圆检测标注的画面。
+
+```bash
+./camera_feature_test ../config/robot_config.yaml --video ../data/test_run.mp4
+```
+
+有些控制项会被自动模式锁住。例如 `white_balance_temperature` 需要先把 `white_balance_automatic` 设为 `0`；`exposure_time_absolute` 需要先把 `auto_exposure` 切到手动模式，常见 UVC 摄像头中 `auto_exposure=1` 表示手动、`3` 表示自动/光圈优先。具体含义可用 `v4l2-ctl -d /dev/videoX --list-ctrls-menus` 确认。
+
+快捷键：
+
+- `p`：暂停/继续
+- `s`：保存当前带标注图像到 `data/frames/`
+- `v`：开始/停止录制 MP4 视频
+- `w`：保存当前检测参数和相机控制项到 `data/vision_tuned.yaml`
+- `r`：在终端打印当前参数
+- `c`：在终端打印当前相机控制项、范围和 inactive 状态
+- `q` 或 `Esc`：退出
+
+### 相机内参/外参标定
+
+标定程序使用棋盘格角点。`--cols` 和 `--rows` 是棋盘格内角点数量，不是方格数量。
+
+```bash
+cd build
+./camera_calibration ../config/robot_config.yaml \
+  --cols 9 --rows 6 --square 0.025 \
+  --samples 20 \
+  --output ../data/camera_calibration.yaml
+```
+
+快捷键：
+
+- `Space` 或 `c`：采集一帧棋盘格样本
+- `k`：根据已采集样本计算内参
+- `e`：用当前可见棋盘格求外参
+- `s`：保存标定结果
+- `q` 或 `Esc`：退出
+
+输出 YAML 包含 `camera_intrinsics: [fx, fy, cx, cy]`、`distortion_coeffs` 和 `camera_extrinsics`。外参是“棋盘格/世界坐标系到相机坐标系”的 3×4 矩阵；若要直接写回 `robot.camera_extrinsics`，请确保棋盘格坐标系与机器人基坐标系定义一致。
+
+只做外参时可以复用已有内参：
+
+```bash
+./camera_calibration ../config/robot_config.yaml \
+  --extrinsic-only \
+  --intrinsics ../data/camera_calibration.yaml
+```
+
+### 电机交互测试
+
+```bash
+cd build
+./motor_test ../config/robot_config.yaml
+```
+
+启动后进入 `motor>` 命令行。常用命令：
+
+- `vel <rad_s>`：发送速度指令
+- `stop`：发送零速度
+- `read [timeout_ms]`：读取一次反馈
+- `monitor on|off`：开关后台反馈显示
+- `pos <rad>`：发送位置指令（需要先配置位置命令字）
+- `pid <kp> <ki> <kd>`：发送 PID 参数（需要先配置 PID 命令字）
+- `frame <cmd_hex> [bytes...]`：按项目的 `0x3E ... CRC` 帧格式构造并发送
+- `raw <bytes...>`：发送原始字节
+- `set poscmd|pidcmd|velcmd <hex|-1>`：运行时设置命令字
+- `set zerodeg|counts|pidscale <value>`：运行时设置编码器零点、位置每圈计数、PID 缩放
+
+反馈显示包含电机绝对位置、按 `encoder_zero_offset_deg` 换算后的关节位置和速度。当前仓库原始代码只明确给出了速度命令 `0x54` 和 15 字节反馈解析；位置/PID 命令字默认禁用，需要按实际电机控制器协议在 `motor_protocol` 中确认后开启。
 
 ### 串口权限与端口名
 
@@ -193,10 +287,26 @@ vision:
   desired_coords: [264.5, 96.5, 298.5, 166.5, 174.5, 144.5]
   # 三个特征点的期望图像坐标 [u1,v1, u2,v2, u3,v3]（像素）
   save_path: "data/frames/"   # 图像帧保存路径（相对于运行目录）
+  hough_dp: 1.0               # Hough 累加器分辨率比例
+  hough_min_dist: 30.0        # 圆心之间的最小距离（像素）
   hough_param1: 100           # HoughCircles Canny 高阈值
   hough_param2: 38            # HoughCircles 圆心累加器阈值（越小检测越多）
   hough_min_radius: 3         # 检测圆的最小半径（像素）
   hough_max_radius: 80        # 检测圆的最大半径（像素）
+  blur_kernel: 7              # 高斯滤波核大小，偶数会自动提升为奇数
+  blur_sigma: 2.0             # 高斯滤波 sigma
+  equalize_hist: false        # 是否对灰度图做直方图均衡
+```
+
+### motor_protocol — 电机测试协议配置
+
+```yaml
+motor_protocol:
+  velocity_command: 0x54       # 已知速度指令命令字
+  position_command: -1         # 位置指令命令字，-1 表示禁用
+  pid_command: -1              # PID 参数指令命令字，-1 表示禁用
+  position_counts_per_rev: 16384
+  pid_scale: 1000
 ```
 
 ### robot — 机器人物理参数
@@ -251,11 +361,15 @@ robot:
 
 ### `vision` — 视觉特征提取
 
-`FeatureExtractor` 类封装摄像头采集和圆检测：
+`FeatureExtractor` 类封装摄像头采集和圆检测；底层圆检测逻辑由 `feature_detection` 公共模块提供，主程序和 `camera_feature_test` 使用同一套检测代码：
 - 修复了原代码中 `VideoCapture` 按值传递的 bug（OpenCV `VideoCapture` 不可廉价拷贝）
 - 使用现代 OpenCV 常量（`cv::COLOR_BGR2GRAY`、`cv::HOUGH_GRADIENT` 等，替代已废弃的 `CV_` 前缀常量）
 - 每帧检测到的圆按半径排序，输出中圆、最大圆、最小圆的坐标和半径
 - 自动保存带标注的图像帧到 `data/frames/`
+
+### `motor_client` — 电机命令与反馈
+
+封装速度命令帧、通用命令帧、原始字节发送和 15 字节编码器反馈解析。`flexjoint_vs` 和 `motor_test` 共用该模块，避免主程序和测试程序使用不同的速度换算或反馈解码逻辑。
 
 ### `main` — 主程序
 
