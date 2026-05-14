@@ -1,12 +1,14 @@
 #include "serial_port.hpp"
 
+#ifndef _WIN32
+
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
 #include <sys/select.h>
 #include <cerrno>
-#include <cstring>
 #include <cstdio>
+#include <cstring>
 
 SerialPort::SerialPort(const std::string& device, int baud_rate)
     : device_(device), baud_rate_(baud_rate), fd_(-1)
@@ -85,18 +87,16 @@ bool SerialPort::configure_termios()
     cfsetispeed(&tty, static_cast<speed_t>(speed));
     cfsetospeed(&tty, static_cast<speed_t>(speed));
 
-    // 8N1 raw mode — mirrors the original Windows DCB configuration
     tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8; // 8 data bits
-    tty.c_cflag &= ~PARENB;                       // no parity
-    tty.c_cflag &= ~CSTOPB;                       // 1 stop bit
-    tty.c_cflag |= CREAD | CLOCAL;                // enable receiver, ignore modem lines
-    tty.c_cflag &= ~CRTSCTS;                      // no hardware flow control
+    tty.c_cflag &= ~PARENB;                     // no parity
+    tty.c_cflag &= ~CSTOPB;                     // 1 stop bit
+    tty.c_cflag |= CREAD | CLOCAL;              // enable receiver, ignore modem lines
+    tty.c_cflag &= ~CRTSCTS;                    // no hardware flow control
 
     tty.c_lflag = 0; // raw input (no echo, no canonical, no signals)
     tty.c_iflag = 0; // no software flow control, no special byte handling
     tty.c_oflag = 0; // raw output
 
-    // Non-blocking reads; timeout handled via select() in read()
     tty.c_cc[VMIN]  = 0;
     tty.c_cc[VTIME] = 0;
 
@@ -119,3 +119,5 @@ int SerialPort::baud_constant(int baud_rate)
         default:     return -1;
     }
 }
+
+#endif

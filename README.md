@@ -1,6 +1,6 @@
 # flexjoint_vs
 
-柔性机械臂视觉伺服控制系统的 Ubuntu 移植版本。原始代码为 Windows/Visual Studio 单文件工程（`chap5.cpp`，约 2000 行），本项目将其重构为模块化 C++17 工程，使用 CMake 构建，支持 Linux 串口（termios）和现代 OpenCV API。
+柔性机械臂视觉伺服控制系统的跨平台 C++17 / CMake 版本。原始代码为 Windows/Visual Studio 单文件工程（`chap5.cpp`，约 2000 行），本项目将其重构为模块化工程，并同时提供 Ubuntu/Linux 与 Windows 的串口实现。
 
 ---
 
@@ -19,7 +19,8 @@ flexjoint_vs/
 │   └── vision.hpp              # 视觉特征提取类声明
 ├── src/
 │   ├── main.cpp                # 主程序：初始化、控制主循环
-│   ├── serial_port.cpp         # POSIX 串口实现（替代 Windows CreateFile/DCB）
+│   ├── serial_port_posix.cpp   # Ubuntu/Linux 串口实现（termios）
+│   ├── serial_port_win32.cpp   # Windows 串口实现（CreateFile/DCB）
 │   ├── modbus_crc.cpp          # CRC-16/MODBUS 校验及速度编码
 │   ├── kinematics.cpp          # 快动态/慢动态雅可比矩阵计算
 │   ├── controller.cpp          # 双层视觉伺服控制器 + PD 备用控制器
@@ -33,9 +34,22 @@ flexjoint_vs/
 ## 依赖环境
 
 ### 操作系统
-Ubuntu 20.04 / 22.04（或其他支持 POSIX termios 的 Linux 发行版）
+
+- Ubuntu 20.04 / 22.04（或其他支持 POSIX termios 的 Linux 发行版）
+- Windows 10 / 11（Visual Studio 2019/2022 或其他支持 C++17 的 MSVC 工具链）
 
 ### 依赖库
+
+通用依赖：
+
+| 库 | 版本要求 | 用途 |
+|----|---------|------|
+| Eigen3 | ≥ 3.3 | 矩阵运算（雅可比、观测器） |
+| OpenCV | ≥ 4.0 | 摄像头采集、Hough 圆检测 |
+| yaml-cpp | ≥ 0.6 | 读取配置文件 |
+| Threads | 系统/工具链自带 | 线程支持 |
+
+Ubuntu 安装示例：
 
 ```bash
 sudo apt update
@@ -47,16 +61,23 @@ sudo apt install \
     libyaml-cpp-dev
 ```
 
-| 库 | 版本要求 | 用途 |
-|----|---------|------|
-| Eigen3 | ≥ 3.3 | 矩阵运算（雅可比、观测器） |
-| OpenCV | ≥ 4.0 | 摄像头采集、Hough 圆检测 |
-| yaml-cpp | ≥ 0.6 | 读取配置文件 |
-| pthreads | 系统自带 | 线程支持 |
+Windows 推荐使用 vcpkg：
+
+```powershell
+vcpkg install eigen3 opencv4 yaml-cpp
+```
+
+使用 CMake 配置 Windows 工程时，需要传入 vcpkg toolchain 文件，例如：
+
+```powershell
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+```
 
 ---
 
 ## 编译
+
+### Ubuntu / Linux
 
 ```bash
 cd flexjoint_vs
@@ -67,25 +88,51 @@ make -j4
 
 编译成功后生成可执行文件 `build/flexjoint_vs`。
 
+### Windows
+
+在 “x64 Native Tools Command Prompt for VS” 或 PowerShell 中执行：
+
+```powershell
+cd flexjoint_vs
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake --build build --config Release
+```
+
+编译成功后生成可执行文件 `build\Release\flexjoint_vs.exe`。如果使用单配置生成器（如 Ninja），可执行文件通常位于 `build\flexjoint_vs.exe`。
+
 ---
 
 ## 运行
+
+### Ubuntu / Linux
 
 ```bash
 # 在 build 目录下运行，传入配置文件路径
 ./flexjoint_vs ../config/robot_config.yaml
 ```
 
+### Windows
+
+```powershell
+# Visual Studio 多配置生成器
+.\build\Release\flexjoint_vs.exe .\config\robot_config.yaml
+
+# 或在 build 目录下运行
+.\Release\flexjoint_vs.exe ..\config\robot_config.yaml
+```
+
 按 `Ctrl+C` 可安全退出，程序会在退出前刷新日志文件。
 
-### 串口权限
+### 串口权限与端口名
 
-首次运行前需将当前用户加入 `dialout` 组，否则无法访问串口：
+Ubuntu 首次运行前需将当前用户加入 `dialout` 组，否则无法访问串口：
 
 ```bash
 sudo usermod -aG dialout $USER
 # 重新登录后生效
 ```
+
+Windows 下使用设备管理器中的串口名，例如 `COM8`。程序会自动把 `COM8` 转换为 Win32 API 需要的 `\\.\COM8` 形式。
 
 ---
 
@@ -97,9 +144,13 @@ sudo usermod -aG dialout $USER
 
 ```yaml
 serial:
-  motor_port: "/dev/ttyUSB0"   # 电机控制器串口设备节点
-  baud_rate: 115200             # 波特率，与电机控制器一致
+  motor_port: "/dev/ttyUSB0"   # 兼容旧配置的默认串口
+  linux_port: "/dev/ttyUSB0"   # Ubuntu/Linux 串口设备节点
+  windows_port: "COM8"         # Windows 串口名
+  baud_rate: 115200            # 波特率，与电机控制器一致
 ```
+
+如果 `linux_port` 或 `windows_port` 存在，程序会按当前操作系统自动选择；否则使用 `motor_port`。
 
 ### camera — 摄像头配置
 
@@ -167,7 +218,10 @@ robot:
 
 ### `serial_port` — 串口通信
 
-替代原 Windows `CreateFile` / `DCB` / `ReadFile` / `WriteFile` 方案，使用 POSIX `termios` 实现 8N1 串口通信。支持带超时的阻塞读（`select`）。
+封装跨平台 8N1 串口通信，主程序只依赖统一的 `SerialPort` 接口：
+
+- Ubuntu/Linux：`serial_port_posix.cpp` 使用 POSIX `termios`、`select`、`read`、`write`
+- Windows：`serial_port_win32.cpp` 参考原始 `chap5.cpp` 的 `CreateFile` / `DCB` / `ReadFile` / `WriteFile` 方案
 
 原始 Windows 代码中存在两个串口句柄（`RobotCOM` 类 + `hCom`），实际控制循环只用 `hCom`，本模块将两者统一为一个 `SerialPort` 类。同时删除了原 `ThreadComm` 线程（仅轮询缓冲区大小，无实际作用）。
 

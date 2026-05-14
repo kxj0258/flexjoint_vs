@@ -7,11 +7,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 find_package(OpenCV 4.0 REQUIRED COMPONENTS core imgproc highgui videoio)
 find_package(Threads REQUIRED)
+set(YAML_CPP_TARGET yaml-cpp)
 find_package(yaml-cpp REQUIRED)
+if(WIN32)
+    if(TARGET yaml-cpp::yaml-cpp)
+        set(YAML_CPP_TARGET yaml-cpp::yaml-cpp)
+    elseif(TARGET yaml-cpp)
+        set(YAML_CPP_TARGET yaml-cpp)
+    endif()
+endif()
+
+set(SERIAL_PORT_SOURCE src/serial_port_posix.cpp)
+if(WIN32)
+    set(SERIAL_PORT_SOURCE src/serial_port_win32.cpp)
+endif()
 
 add_executable(flexjoint_vs
     src/main.cpp
-    src/serial_port.cpp
+    ${SERIAL_PORT_SOURCE}
     src/kinematics.cpp
     src/controller.cpp
     src/vision.cpp
@@ -24,7 +37,11 @@ target_link_libraries(flexjoint_vs PRIVATE
     Eigen3::Eigen
     ${OpenCV_LIBS}
     Threads::Threads
-    yaml-cpp
+    ${YAML_CPP_TARGET}
 )
 
-target_compile_options(flexjoint_vs PRIVATE -Wall -Wextra -Wno-unused-parameter)
+if(MSVC)
+    target_compile_options(flexjoint_vs PRIVATE /W4)
+else()
+    target_compile_options(flexjoint_vs PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()

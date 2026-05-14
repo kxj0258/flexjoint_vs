@@ -1,9 +1,10 @@
 #pragma once
 #include <string>
 #include <cstdint>
+#include <cstddef>
 
-// POSIX serial port wrapper (8N1, configurable baud rate).
-// Replaces the Windows CreateFile/DCB/ReadFile/WriteFile pattern.
+// Cross-platform serial port wrapper (8N1, configurable baud rate).
+// Linux uses termios; Windows uses CreateFile/DCB/ReadFile/WriteFile.
 class SerialPort {
 public:
     SerialPort(const std::string& device, int baud_rate);
@@ -22,8 +23,15 @@ public:
 private:
     std::string device_;
     int baud_rate_;
+
+#ifdef _WIN32
+    void* handle_;
+
+    static std::string normalize_device_name(const std::string& device);
+#else
     int fd_;
 
     bool configure_termios();
     static int baud_constant(int baud_rate);
+#endif
 };

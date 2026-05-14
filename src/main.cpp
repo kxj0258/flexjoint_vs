@@ -3,11 +3,13 @@
 #include <csignal>
 #include <cstdio>
 #include <cmath>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <string>
 #include <thread>
 #include <chrono>
+#include <vector>
 
 #include "serial_port.hpp"
 #include "modbus_crc.hpp"
@@ -33,7 +35,15 @@ static AppConfig load_config(const std::string& path)
     YAML::Node y = YAML::LoadFile(path);
     AppConfig c;
 
-    c.serial_port  = y["serial"]["motor_port"].as<std::string>();
+    const auto serial = y["serial"];
+    c.serial_port = serial["motor_port"].as<std::string>();
+#ifdef _WIN32
+    if (serial["windows_port"])
+        c.serial_port = serial["windows_port"].as<std::string>();
+#else
+    if (serial["linux_port"])
+        c.serial_port = serial["linux_port"].as<std::string>();
+#endif
     c.baud_rate    = y["serial"]["baud_rate"].as<int>();
 
     c.initial_angle_rad         = y["robot"]["initial_angle_rad"].as<float>();

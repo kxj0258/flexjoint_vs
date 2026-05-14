@@ -1,5 +1,9 @@
 serial:
   motor_port: "/dev/ttyUSB0"
+  # Optional platform-specific overrides. If present, the program picks the
+  # matching one at runtime; motor_port remains the fallback.
+  linux_port: "/dev/ttyUSB0"
+  windows_port: "COM8"
   baud_rate: 115200
 
 camera:
