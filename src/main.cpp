@@ -1,4 +1,5 @@
 #include <atomic>
+#include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <exception>
@@ -15,6 +16,29 @@
 static std::atomic<bool> g_running{true};
 
 static void sig_handler(int) { g_running = false; }
+
+namespace {
+
+constexpr float kVelocitySaturation = 1.5f;
+constexpr float kMaxSafeAngleRad = 1.0f;
+constexpr float kMinSafeAngleRad = -1.0f;
+constexpr float kVisionMarginPx = 25.0f;
+
+bool feature_points_near_boundary(const float img_pos[6], float width, float height,
+                                  float margin)
+{
+    for (int i = 0; i < 3; ++i) {
+        const float u = img_pos[2 * i];
+        const float v = img_pos[2 * i + 1];
+        if (u < margin || u > width - margin ||
+            v < margin || v > height - margin) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
 
 int main(int argc, char* argv[])
 {
@@ -77,6 +101,19 @@ int main(int argc, char* argv[])
     }
 
     while (g_running) {
+        // 先读当前关节状态，再参与本周期控制计算，避免安全判断滞后一拍。
+        float angle_rad = state[0];
+        float vel_rad_s = state[1];
+        MotorFeedback feedback;
+        if (motor.read_system_status(cfg.encoder_zero_offset_deg, feedback, 200, true) ||
+            motor.read_feedback(cfg.encoder_zero_offset_deg, feedback, 200, true)) {
+            angle_rad = static_cast<float>(feedback.joint_position_rad);
+            vel_rad_s = static_cast<float>(feedback.velocity_rad_s);
+        }
+
+        state[0] = angle_rad;
+        state[1] = vel_rad_s;
+
         // Pack inputs from state
         float joint_state[2] = { state[0], state[1] };
         float para_slow[9];
@@ -107,35 +144,43 @@ int main(int argc, char* argv[])
         cal_joint_vel(joint_state, img_pos, obs, para_slow, q_c,
                       &joint_cal, para_update, cfg.ctrl);
 
-        // Saturate velocity command
-        const float sat = 1.5f;
+        // 第一层保护：先做速度限幅，防止控制器输出瞬时过大。
         float velocity = joint_cal;
-        if (velocity >  sat) velocity =  sat;
-        if (velocity < -sat) velocity = -sat;
+        velocity = std::clamp(velocity, -kVelocitySaturation, kVelocitySaturation);
 
-        printf("vel_cmd=%.4f rad/s\n", velocity);
+        // 第二层保护：位置软限位。
+        // 如果当前位置已经越界，并且速度指令还在朝危险方向继续运动，则强制清零。
+        if ((angle_rad > kMaxSafeAngleRad && velocity > 0.0f) ||
+            (angle_rad < kMinSafeAngleRad && velocity < 0.0f)) {
+            velocity = 0.0f;
+            printf("Position Limit Triggered\n");
+        }
+
+        // 第三层保护：视觉特征点边界限制。
+        // 任意一个特征点接近图像边缘时，立即停止，避免目标飞出视野导致伺服失稳。
+        const bool vision_limit =
+            feature_points_near_boundary(img_pos,
+                                         static_cast<float>(cfg.vision.width),
+                                         static_cast<float>(cfg.vision.height),
+                                         kVisionMarginPx);
+        if (vision_limit) {
+            velocity = 0.0f;
+            printf("Vision Boundary Limit Triggered\n");
+        }
+
+        printf("vel_cmd=%.4f rad/s (joint_cal=%.4f)\n", velocity, joint_cal);
 
         // Send to motor
         motor.send_velocity_rad_s(velocity);
-
-        // Read encoder feedback
-        float angle_rad = state[0], vel_rad_s = state[1];
-        MotorFeedback feedback;
-        if (motor.read_feedback(cfg.encoder_zero_offset_deg, feedback, 5000)) {
-            angle_rad = static_cast<float>(feedback.joint_position_rad);
-            vel_rad_s = static_cast<float>(feedback.velocity_rad_s);
-        }
         printf("angle=%.4f rad  vel=%.4f rad/s\n", angle_rad, vel_rad_s);
 
         // Update state
-        state[0] = angle_rad;
-        state[1] = vel_rad_s;
         for (int i = 0; i < 6; i++) state[2 + i] = img_pos[i];
         for (int i = 0; i < 9; i++) state[8 + i] = para_update[i];
         state[17] = para_update[9];  state[18] = para_update[10];
         state[19] = para_update[11]; state[20] = para_update[12];
         state[21] = para_update[13];
-        state[22] = joint_cal;
+        state[22] = velocity;
         state[23] = para_update[14];
         state[24] = para_update[15];
         state[25] = para_update[16];

@@ -1,8 +1,8 @@
 serial:
-  motor_port: "/dev/ttyUSB0"
+  motor_port: "/dev/ttyACM0"
   # Optional platform-specific overrides. If present, the program picks the
   # matching one at runtime; motor_port remains the fallback.
-  linux_port: "/dev/ttyUSB0"
+  linux_port: "/dev/ttyACM0"
   windows_port: "COM8"
   baud_rate: 115200
 
@@ -37,20 +37,19 @@ vision:
   save_path: "data/frames/"
   hough_dp: 1.0
   hough_min_dist: 30.0
-  hough_param1: 100
-  hough_param2: 38
-  hough_min_radius: 3
-  hough_max_radius: 80
+  hough_param1: 150
+  hough_param2: 30
+  hough_min_radius: 10
+  hough_max_radius: 25
   blur_kernel: 7
-  blur_sigma: 2.0
+  blur_sigma: 3.3
   equalize_hist: false
 
 motor_protocol:
   # Existing controller code uses this command for velocity frames.
   velocity_command: 0x54
-  # Set these after confirming your motor controller protocol. The motor_test
-  # tool enables pos/pid commands when the command byte is 0..255.
-  position_command: -1
+  # RS485 V2.3: 0x55 为绝对位置闭环控制命令。
+  position_command: 0x55
   pid_command: -1
   position_counts_per_rev: 16384
   pid_scale: 1000

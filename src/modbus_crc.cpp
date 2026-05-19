@@ -1,4 +1,7 @@
 #include "modbus_crc.hpp"
+
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 void invert_uint8(uint8_t* dst, const uint8_t* src)
@@ -41,24 +44,13 @@ uint16_t crc16_modbus(const uint8_t* data, uint32_t len)
     return crc;
 }
 
-// Encode a signed RPM value into two's-complement high/low bytes.
-// The motor controller expects a 16-bit signed integer split into two bytes.
+// Encode a signed 0.1 RPM value into little-endian int16_t bytes.
 void velocity_to_bytes(float velocity_rpm, uint8_t& data_low, uint8_t& data_high)
 {
-    if (velocity_rpm >= 0) {
-        uint16_t val = static_cast<uint16_t>(velocity_rpm);
-        data_high = static_cast<uint8_t>(val / 256);
-        data_low  = static_cast<uint8_t>(val % 256);
-    } else {
-        uint16_t val = static_cast<uint16_t>(-velocity_rpm);
-        uint8_t hi = static_cast<uint8_t>(val / 256);
-        uint8_t lo = static_cast<uint8_t>(val % 256);
-        if (lo == 0) {
-            data_high = 0xFF - hi + 0x01;
-            data_low  = 0x00;
-        } else {
-            data_high = 0xFF - hi;
-            data_low  = 0xFF - lo + 0x01;
-        }
-    }
+    const float clamped =
+        std::max(-32768.0f, std::min(32767.0f, std::round(velocity_rpm)));
+    const int16_t value = static_cast<int16_t>(clamped);
+    const uint16_t raw = static_cast<uint16_t>(value);
+    data_low  = static_cast<uint8_t>(raw & 0xFF);
+    data_high = static_cast<uint8_t>((raw >> 8) & 0xFF);
 }

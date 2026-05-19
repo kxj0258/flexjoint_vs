@@ -153,11 +153,14 @@ cd build
 ./camera_feature_test ../config/robot_config.yaml --video ../data/test_run.mp4
 ```
 
+可用 `--show-gray` 启动时直接显示送入 Hough 圆检测的灰度预处理图，也可运行中按 `g` 开关该窗口。
+
 有些控制项会被自动模式锁住。例如 `white_balance_temperature` 需要先把 `white_balance_automatic` 设为 `0`；`exposure_time_absolute` 需要先把 `auto_exposure` 切到手动模式，常见 UVC 摄像头中 `auto_exposure=1` 表示手动、`3` 表示自动/光圈优先。具体含义可用 `v4l2-ctl -d /dev/videoX --list-ctrls-menus` 确认。
 
 快捷键：
 
 - `p`：暂停/继续
+- `g`：显示/隐藏送入 Hough 圆检测的灰度预处理图
 - `s`：保存当前带标注图像到 `data/frames/`
 - `v`：开始/停止录制 MP4 视频
 - `w`：保存当前检测参数和相机控制项到 `data/vision_tuned.yaml`
@@ -172,7 +175,7 @@ cd build
 ```bash
 cd build
 ./camera_calibration ../config/robot_config.yaml \
-  --cols 9 --rows 6 --square 0.025 \
+  --cols 8 --rows 11 --square 0.015 \
   --samples 20 \
   --output ../data/camera_calibration.yaml
 ```

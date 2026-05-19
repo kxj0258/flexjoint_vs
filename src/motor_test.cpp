@@ -56,8 +56,11 @@ void print_help()
     printf("  vel <rad_s>                 send velocity command\n");
     printf("  stop                        send zero velocity\n");
     printf("  pos <rad>                   send position command if configured\n");
+    printf("  poscnt <count>              send 0x55 absolute position count\n");
     printf("  pid <kp> <ki> <kd>          send PID command if configured\n");
-    printf("  read [timeout_ms]           read one feedback packet\n");
+    printf("  read [timeout_ms]           send 0x0B and read 20-byte system status\n");
+    printf("  read2f [timeout_ms]         read legacy 15-byte 0x2F feedback packet\n");
+    printf("  readsys [timeout_ms]        alias of read\n");
     printf("  monitor on|off              print feedback packets in background\n");
     printf("  frame <cmd_hex> [bytes...]  build 0x3E frame with CRC and send it\n");
     printf("  raw <bytes...>              send exact bytes, e.g. raw 3E 00 01 54 02 00 00\n");
@@ -113,11 +116,18 @@ void print_bytes(const std::vector<uint8_t>& bytes)
 
 void print_feedback(const MotorFeedback& fb)
 {
-    printf("[fb] abs=%.5f rad (%.2f deg raw=%d) joint=%.5f rad "
-           "vel=%.5f rad/s raw_vel=%d\n",
+    printf("[fb] abs=%.5f rad (%.2f deg raw=%d) multi=%.5f rad raw_multi=%d "
+           "joint=%.5f rad vel=%.5f rad/s raw_vel=%d",
            fb.absolute_position_rad, fb.absolute_position_deg,
-           fb.raw_angle_count, fb.joint_position_rad,
-           fb.velocity_rad_s, fb.raw_velocity_count);
+           fb.raw_angle_count, fb.multi_turn_position_rad, fb.raw_multi_turn_count,
+           fb.joint_position_rad, fb.velocity_rad_s, fb.raw_velocity_count);
+    if (fb.system_status_valid) {
+        printf(" U=%.2fV I=%.2fA T=%.2fC fault=0x%02X state=%u",
+               fb.bus_voltage_v, fb.phase_current_a, fb.temperature_c,
+               static_cast<unsigned>(fb.fault_code),
+               static_cast<unsigned>(fb.run_state));
+    }
+    printf("\n");
 }
 
 void print_protocol(const MotorProtocolConfig& cfg)
@@ -162,7 +172,7 @@ int main(int argc, char* argv[])
     std::mutex port_mutex;
     std::mutex print_mutex;
     std::atomic<bool> running{true};
-    std::atomic<bool> monitor_enabled{true};
+    std::atomic<bool> monitor_enabled{false};
     std::atomic<bool> commanded_motion{false};
 
     std::thread monitor([&] {
@@ -176,19 +186,21 @@ int main(int argc, char* argv[])
             bool ok = false;
             {
                 std::lock_guard<std::mutex> lock(port_mutex);
-                ok = motor.read_feedback(encoder_zero_deg, fb,
-                                         opts.monitor_timeout_ms, true);
+                ok = motor.read_system_status(encoder_zero_deg, fb,
+                                              opts.monitor_timeout_ms, true);
             }
             if (ok) {
                 std::lock_guard<std::mutex> lock(print_mutex);
                 print_feedback(fb);
             }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     });
 
     printf("Motor test opened %s @ %d baud.\n", app.serial_port.c_str(), app.baud_rate);
     print_help();
     print_protocol(motor.protocol());
+    printf("monitor off\n");
 
     std::string line;
     while (running) {
@@ -237,6 +249,15 @@ int main(int argc, char* argv[])
                     commanded_motion = true;
                     printf("sent position %.6f rad\n", value);
                 }
+            } else if (cmd == "poscnt") {
+                unsigned long value = 0;
+                if (!(iss >> value))
+                    throw std::runtime_error("usage: poscnt <count>");
+                std::lock_guard<std::mutex> lock(port_mutex);
+                if (motor.send_position_counts(static_cast<uint32_t>(value))) {
+                    commanded_motion = true;
+                    printf("sent position count %lu\n", value);
+                }
             } else if (cmd == "pid") {
                 double kp = 0.0, ki = 0.0, kd = 0.0;
                 if (!(iss >> kp >> ki >> kd))
@@ -251,10 +272,44 @@ int main(int argc, char* argv[])
                 bool ok = false;
                 {
                     std::lock_guard<std::mutex> lock(port_mutex);
+                    ok = motor.read_system_status(encoder_zero_deg, fb, timeout_ms);
+                }
+                if (ok) {
+                    print_feedback(fb);
+                } else {
+                    fprintf(stderr,
+                            "read timeout/no response on 0x0B, check motor power/address/wiring\n");
+                }
+            } else if (cmd == "read2f") {
+                int timeout_ms = 1000;
+                iss >> timeout_ms;
+                MotorFeedback fb;
+                bool ok = false;
+                {
+                    std::lock_guard<std::mutex> lock(port_mutex);
                     ok = motor.read_feedback(encoder_zero_deg, fb, timeout_ms);
                 }
-                if (ok)
+                if (ok) {
                     print_feedback(fb);
+                } else {
+                    fprintf(stderr,
+                            "read2f timeout/no legacy 0x2F feedback available\n");
+                }
+            } else if (cmd == "readsys") {
+                int timeout_ms = 1000;
+                iss >> timeout_ms;
+                MotorFeedback fb;
+                bool ok = false;
+                {
+                    std::lock_guard<std::mutex> lock(port_mutex);
+                    ok = motor.read_system_status(encoder_zero_deg, fb, timeout_ms);
+                }
+                if (ok) {
+                    print_feedback(fb);
+                } else {
+                    fprintf(stderr,
+                            "readsys timeout/no response on 0x0B, check motor power/address/wiring\n");
+                }
             } else if (cmd == "monitor") {
                 std::string mode;
                 if (!(iss >> mode))

@@ -41,6 +41,7 @@ struct Options {
     std::string tuned_output = "data/vision_tuned.yaml";
     std::string video_output;
     int         print_every = 10;
+    bool        show_gray_debug = false;
 };
 
 struct Recorder {
@@ -64,9 +65,9 @@ struct CameraControl {
 
 void print_usage(const char* argv0)
 {
-    printf("Usage: %s <config.yaml> [--print-every N] [--save-settings PATH] [--video PATH]\n",
+    printf("Usage: %s <config.yaml> [--print-every N] [--save-settings PATH] [--video PATH] [--show-gray]\n",
            argv0);
-    printf("Keys: q/ESC quit, p pause, s save image, v start/stop MP4 recording, w write tuned settings, r print settings, c print camera controls\n");
+    printf("Keys: q/ESC quit, p pause, g show/hide Hough input gray image, s save image, v start/stop MP4 recording, w write tuned settings, r print settings, c print camera controls\n");
 }
 
 bool parse_args(int argc, char* argv[], Options& opts)
@@ -84,6 +85,8 @@ bool parse_args(int argc, char* argv[], Options& opts)
             opts.tuned_output = argv[++i];
         } else if (arg == "--video" && i + 1 < argc) {
             opts.video_output = argv[++i];
+        } else if (arg == "--show-gray") {
+            opts.show_gray_debug = true;
         } else if (arg == "-h" || arg == "--help") {
             return false;
         } else {
@@ -523,6 +526,8 @@ int main(int argc, char* argv[])
         camera_controls.print_controls();
 
     bool paused = false;
+    bool show_gray_debug = opts.show_gray_debug;
+    bool gray_window_created = false;
     int frame_index = 0;
     cv::Mat frame;
     int refresh_counter = 0;
@@ -558,11 +563,21 @@ int main(int argc, char* argv[])
         cfg.equalize_hist  = equalize != 0;
 
         cv::Mat display = frame.clone();
-        std::vector<FeatureCircle> circles = detect_feature_circles(frame, cfg);
+        cv::Mat gray_debug;
+        std::vector<FeatureCircle> circles = detect_feature_circles(
+            frame, cfg, show_gray_debug ? &gray_debug : nullptr);
         std::array<FeatureCircle, 3> selected;
         const bool has_three = select_three_feature_circles(circles, selected);
         draw_feature_overlay(display, circles, has_three ? &selected : nullptr,
                              app.vision.desired);
+
+        if (show_gray_debug && !gray_debug.empty()) {
+            if (!gray_window_created) {
+                cv::namedWindow("hough_input_gray", cv::WINDOW_NORMAL);
+                gray_window_created = true;
+            }
+            cv::imshow("hough_input_gray", gray_debug);
+        }
 
         char status[160];
         std::snprintf(status, sizeof(status), "circles=%zu selected=%s p:%d/%d r:%d-%d",
@@ -605,6 +620,14 @@ int main(int argc, char* argv[])
             break;
         if (key == 'p')
             paused = !paused;
+        if (key == 'g') {
+            show_gray_debug = !show_gray_debug;
+            if (!show_gray_debug && gray_window_created) {
+                cv::destroyWindow("hough_input_gray");
+                gray_window_created = false;
+            }
+            printf("Hough input gray debug: %s\n", show_gray_debug ? "on" : "off");
+        }
         if (key == 'v') {
             if (recorder.active) {
                 stop_recording(recorder);
