@@ -1,0 +1,4 @@
+# Copy the main config, keep hardware/calibration settings identical across
+# runs, and use this section for the fast-subsystem ablation.
+experiment:
+  controller_mode: "proposed_no_fast"

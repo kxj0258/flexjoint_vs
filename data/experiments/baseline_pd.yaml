@@ -1,0 +1,6 @@
+# Copy the main config, keep hardware/calibration settings identical across
+# runs, and use this section for the fixed-intrinsics PD visual-servo baseline.
+# This is an engineering baseline built from cal_control, not an exact
+# reimplementation of the paper's reference [18].
+experiment:
+  controller_mode: "baseline_pd"

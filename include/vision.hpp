@@ -1,6 +1,8 @@
 #pragma once
 #include <opencv2/videoio.hpp>
 #include <string>
+#include <utility>
+#include <vector>
 
 // Wraps camera capture and Hough-circle feature extraction.
 // Fixes the original bug where VideoCapture was passed by value.
@@ -22,6 +24,7 @@ public:
         bool  equalize_hist   = false;
         float desired[6]     = {264.5f, 96.5f, 298.5f, 166.5f, 174.5f, 144.5f};
         std::string save_path = "data/frames/";
+        std::vector<std::pair<std::string, int>> camera_controls;
     };
 
     explicit FeatureExtractor(const Config& cfg);
@@ -34,6 +37,8 @@ public:
     // rad_out[3]: radius of mid, max, min circle
     // Returns false if capture or detection fails.
     bool extract(float img_pos[6], int rad_out[3]);
+    bool extract(float img_pos[6], int rad_out[3], cv::Mat* raw_frame,
+                 cv::Mat* annotated_frame);
 
 private:
     Config        cfg_;

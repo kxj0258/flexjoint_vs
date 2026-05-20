@@ -1,0 +1,25 @@
+vision:
+  hough_dp: 1
+  hough_min_dist: 23
+  hough_param1: 151
+  hough_param2: 29
+  hough_min_radius: 10
+  hough_max_radius: 25
+  blur_kernel: 7
+  blur_sigma: 3.3
+  equalize_hist: false
+camera_controls:
+  Brightness: 16
+  Contrast: 34
+  Saturation: 64
+  Hue: 0
+  White_Balance,_Automatic: 1
+  Gamma: 100
+  Gain: 70
+  Power_Line_Frequency: 2
+  White_Balance_Temperature: 4600
+  Sharpness: 2
+  Backlight_Compensation: 1
+  Auto_Exposure: 3
+  Exposure_Time,_Absolute: 157
+  Exposure,_Dynamic_Framerate: 0

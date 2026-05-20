@@ -20,6 +20,10 @@ public:
     // Blocking read with timeout_ms. Returns bytes read, 0 on timeout, -1 on error.
     int read(uint8_t* buf, size_t max_len, int timeout_ms);
 
+    // Clear pending serial data. Returns false if the platform call fails.
+    bool flush_input();
+    bool flush_io();
+
 private:
     std::string device_;
     int baud_rate_;

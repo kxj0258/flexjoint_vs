@@ -10,8 +10,36 @@ struct MotorProtocolConfig {
     int    velocity_command        = 0x54;
     int    position_command        = 0x55;
     int    pid_command             = -1;
+    int    feedback_command        = 0x0B;
+    uint8_t sequence               = 0x00;
+    uint8_t address                = 0x01;
+    bool   strict_address          = false;
+    bool   consume_command_response = true;
+    bool   debug_frames            = false;
     double position_counts_per_rev = 16384.0;
     double pid_scale               = 1000.0;
+};
+
+struct MotorFrame {
+    uint8_t header = 0;
+    uint8_t sequence = 0;
+    uint8_t address = 0;
+    uint8_t command = 0;
+    uint8_t payload_len = 0;
+    std::vector<uint8_t> payload;
+    uint16_t crc_received = 0;
+    uint16_t crc_calculated = 0;
+    bool crc_ok = false;
+};
+
+struct MotorReadStats {
+    int skipped_frames = 0;
+    int crc_errors = 0;
+    int address_mismatches = 0;
+    int malformed_frames = 0;
+    uint8_t last_skipped_command = 0;
+    uint8_t last_skipped_payload_len = 0;
+    bool saw_frame = false;
 };
 
 struct MotorFeedback {
@@ -34,6 +62,10 @@ struct MotorFeedback {
 
 std::vector<uint8_t> build_motor_frame(uint8_t command,
                                        const std::vector<uint8_t>& payload);
+std::vector<uint8_t> build_motor_frame(uint8_t command,
+                                       const std::vector<uint8_t>& payload,
+                                       uint8_t sequence,
+                                       uint8_t address);
 
 class MotorClient {
 public:
@@ -50,11 +82,21 @@ public:
                             int timeout_ms, bool quiet = false);
     bool read_feedback(double encoder_zero_deg, MotorFeedback& feedback,
                        int timeout_ms, bool quiet = false);
+    bool read_feedback_command(uint8_t command, double encoder_zero_deg,
+                               MotorFeedback& feedback, int timeout_ms,
+                               bool quiet = false);
+    bool read_frame(uint8_t expected_command, MotorFrame& frame,
+                    int timeout_ms, bool quiet = false,
+                    MotorReadStats* stats = nullptr);
+    bool consume_response(uint8_t command, int timeout_ms = 5,
+                          bool quiet = true);
 
     const MotorProtocolConfig& protocol() const { return cfg_; }
     MotorProtocolConfig& protocol() { return cfg_; }
+    const MotorReadStats& last_read_stats() const { return last_read_stats_; }
 
 private:
     SerialPort&          port_;
     MotorProtocolConfig  cfg_;
+    MotorReadStats       last_read_stats_;
 };

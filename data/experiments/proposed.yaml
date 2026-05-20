@@ -1,0 +1,4 @@
+# Copy the main config, keep hardware/calibration settings identical across
+# runs, and use this section for the nominal controller.
+experiment:
+  controller_mode: "proposed"

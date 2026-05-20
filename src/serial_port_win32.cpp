@@ -148,6 +148,32 @@ int SerialPort::read(uint8_t* buf, size_t max_len, int timeout_ms)
     return static_cast<int>(bytes_read);
 }
 
+bool SerialPort::flush_input()
+{
+    HANDLE handle = static_cast<HANDLE>(handle_);
+    if (handle == INVALID_HANDLE_VALUE)
+        return false;
+    if (!PurgeComm(handle, PURGE_RXCLEAR)) {
+        fprintf(stderr, "SerialPort: PurgeComm RX failed (Win32 error %lu)\n",
+                GetLastError());
+        return false;
+    }
+    return true;
+}
+
+bool SerialPort::flush_io()
+{
+    HANDLE handle = static_cast<HANDLE>(handle_);
+    if (handle == INVALID_HANDLE_VALUE)
+        return false;
+    if (!PurgeComm(handle, PURGE_TXCLEAR | PURGE_RXCLEAR)) {
+        fprintf(stderr, "SerialPort: PurgeComm IO failed (Win32 error %lu)\n",
+                GetLastError());
+        return false;
+    }
+    return true;
+}
+
 std::string SerialPort::normalize_device_name(const std::string& device)
 {
     if (device.rfind("\\\\.\\", 0) == 0)

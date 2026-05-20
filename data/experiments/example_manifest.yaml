@@ -1,0 +1,17 @@
+# Example manifest for scripts/compare_runs.py.
+# Replace the run paths after collecting hardware runs with the matching
+# experiment.controller_mode in each run_config.yaml.
+output_dir: comparison_section_vb
+experiments:
+  - name: proposed
+    label: Proposed controller
+    run: ../log/PROPOSED_RUN_TIMESTAMP
+  - name: proposed_no_fast
+    label: Proposed without fast subsystem
+    run: ../log/PROPOSED_NO_FAST_RUN_TIMESTAMP
+  - name: baseline_pd
+    label: Baseline PD engineering controller
+    run: ../log/BASELINE_PD_RUN_TIMESTAMP
+  - name: baseline_pd_no_fast
+    label: Baseline PD without fast subsystem
+    run: ../log/BASELINE_PD_NO_FAST_RUN_TIMESTAMP

@@ -1,0 +1,124 @@
+serial:
+  motor_port: "/dev/ttyACM0"
+  # Optional platform-specific overrides. If present, the program picks the
+  # matching one at runtime; motor_port remains the fallback.
+  linux_port: "/dev/ttyACM0"
+  windows_port: "COM13"
+  baud_rate: 115200
+
+camera:
+  index: 0
+  fps: 60
+  width: 640
+  height: 480
+
+camera_controls:
+  # Linux/V4L2 only. Order matters for controls that depend on auto/manual mode.
+  auto_exposure: 3
+  exposure_time_absolute: 157
+  white_balance_automatic: 1
+  gain: 30
+  brightness: 18
+  contrast: 34
+  saturation: 64
+  gamma: 100
+  sharpness: 2
+  backlight_compensation: 1
+
+control:
+  K1: 1.42
+  B: 0.000049
+  K2: 0.001
+  Gamma: 0.0001
+  K4: 2.7
+  eps: 0.1
+  Kq: 50.0
+  cmd_c1: 1.5
+  cmd_c2: 0.325
+  K_dtk_I: 0.8
+  omega_dtk: 0.6
+  h: 0.04
+  Mr: 1.0
+  Jm: 1.0
+  Kp: 5.0
+  Kd: 0.35
+  Ps: [10.0, 15.0, 10.0, 6.0]
+  mu_rho: [0.01, 0.0001, 0.01, 0.001, 0.001]
+
+vision:
+  # desired_coords: [264.5, 96.5, 298.5, 166.5, 174.5, 144.5]
+  desired_coords: [266.5, 125.5, 313.5, 202.5, 180.5, 179.5]
+  save_path: "data/frames/"
+  hough_dp: 1.0
+  hough_min_dist: 30.0
+  hough_param1: 150
+  hough_param2: 30
+  hough_min_radius: 10
+  hough_max_radius: 25
+  blur_kernel: 7
+  blur_sigma: 3.3
+  equalize_hist: false
+
+motor_protocol:
+  address: 0x01
+  sequence: 0x00
+  feedback_command: 0x0B
+  strict_address: false
+  consume_command_response: true
+  debug_frames: false
+  # Existing controller code uses this command for velocity frames.
+  velocity_command: 0x54
+  # RS485 V2.3: 0x55 为绝对位置闭环控制命令。
+  position_command: 0x55
+  pid_command: -1
+  position_counts_per_rev: 16384
+  pid_scale: 1000
+
+task:
+  enable_completion_check: true
+  image_error_tolerance_px: 5.0
+  velocity_tolerance_rad_s: 0.03
+  stable_frames_required: 30
+  max_runtime_s: 120.0
+  max_control_cycles: 0
+  return_to_zero_on_exit: true
+  # motor_pos_rad matches motor_test command "pos 0"; joint_rad uses
+  # encoder_zero_offset_deg to return to a joint angle.
+  return_zero_mode: "motor_pos_rad"
+  return_zero_joint_rad: 0.0
+  return_zero_motor_pos_rad: 0.0
+  return_to_zero_timeout_s: 8.0
+  max_vision_failures: 30
+  max_feedback_failures: 30
+  velocity_saturation_rad_s: 1.5
+  min_safe_angle_rad: -1.0
+  max_safe_angle_rad: 1.0
+  vision_boundary_margin_px: 25.0
+
+log:
+  root_dir: "data/log"
+
+video:
+  save_raw_video: true
+  save_annotated_video: true
+  raw_filename: "raw_video.mp4"
+  annotated_filename: "annotated_video.mp4"
+  codec: "mp4v"
+
+experiment:
+  controller_mode: "proposed_no_fast"
+
+robot:
+  L: 0.3
+  rt_e1: [0.06, -0.055, 0.0]
+  rt_e2: [0.075, 0.075, 0.0]
+  initial_angle_rad: -0.185
+  encoder_zero_offset_deg: 10.621692
+  # fx, fy, cx, cy
+  camera_intrinsics: [487.05, 487.05, 338.23, 231.89]
+  # row-major 3x4 extrinsic matrix (rows 0-2, cols 0-3)
+  camera_extrinsics: [
+    -0.0561, -0.9962, -0.0673,  0.0015,
+     0.9981, -0.0577,  0.0208, -0.4200,
+    -0.0246, -0.0660,  0.9975,  0.4523
+  ]

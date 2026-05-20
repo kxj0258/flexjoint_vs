@@ -32,6 +32,7 @@ bool SerialPort::open()
         fd_ = -1;
         return false;
     }
+    flush_input();
     return true;
 }
 
@@ -69,6 +70,28 @@ int SerialPort::read(uint8_t* buf, size_t max_len, int timeout_ms)
 
     ssize_t n = ::read(fd_, buf, max_len);
     return static_cast<int>(n);
+}
+
+bool SerialPort::flush_input()
+{
+    if (fd_ < 0)
+        return false;
+    if (tcflush(fd_, TCIFLUSH) != 0) {
+        fprintf(stderr, "SerialPort: tcflush input failed: %s\n", strerror(errno));
+        return false;
+    }
+    return true;
+}
+
+bool SerialPort::flush_io()
+{
+    if (fd_ < 0)
+        return false;
+    if (tcflush(fd_, TCIOFLUSH) != 0) {
+        fprintf(stderr, "SerialPort: tcflush io failed: %s\n", strerror(errno));
+        return false;
+    }
+    return true;
 }
 
 bool SerialPort::configure_termios()

@@ -81,36 +81,22 @@ void draw_feature_overlay(cv::Mat& image,
                           const std::array<FeatureCircle, 3>* selected,
                           const float desired[6])
 {
-    for (const auto& c : circles) {
-        cv::Point center(cvRound(c.center.x), cvRound(c.center.y));
-        cv::circle(image, center, cvRound(c.radius), cv::Scalar(255, 0, 0), 1);
-        cv::circle(image, center, 2, cv::Scalar(255, 0, 0), -1);
-    }
+    (void)circles;
 
     if (selected) {
-        static const cv::Scalar colors[3] = {
-            cv::Scalar(0, 255, 255),
-            cv::Scalar(0, 255, 0),
-            cv::Scalar(0, 128, 255)
-        };
-        static const char* labels[3] = {"mid", "max", "min"};
         for (int i = 0; i < 3; ++i) {
             const auto& c = (*selected)[i];
             cv::Point center(cvRound(c.center.x), cvRound(c.center.y));
-            cv::circle(image, center, cvRound(c.radius), colors[i], 2);
-            cv::circle(image, center, 3, colors[i], -1);
-            cv::putText(image, labels[i], center + cv::Point(5, -5),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.5, colors[i], 1,
-                        cv::LINE_AA);
+            cv::circle(image, center, cvRound(c.radius), cv::Scalar(255, 0, 0), 2);
         }
     }
 
     if (desired) {
-        cv::circle(image, cv::Point(cvRound(desired[0]), cvRound(desired[1])),
-                   21, cv::Scalar(0, 0, 255), 2);
-        cv::circle(image, cv::Point(cvRound(desired[2]), cvRound(desired[3])),
-                   24, cv::Scalar(0, 0, 255), 2);
-        cv::circle(image, cv::Point(cvRound(desired[4]), cvRound(desired[5])),
-                   17, cv::Scalar(0, 0, 255), 2);
+        static const int desired_radius[3] = {21, 24, 17};
+        for (int i = 0; i < 3; ++i) {
+            cv::circle(image,
+                       cv::Point(cvRound(desired[2 * i]), cvRound(desired[2 * i + 1])),
+                       desired_radius[i], cv::Scalar(0, 0, 255), 2);
+        }
     }
 }

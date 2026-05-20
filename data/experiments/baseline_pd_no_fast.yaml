@@ -1,0 +1,4 @@
+# Copy the main config, keep hardware/calibration settings identical across
+# runs, and use this section for the PD baseline without fast vibration damping.
+experiment:
+  controller_mode: "baseline_pd_no_fast"

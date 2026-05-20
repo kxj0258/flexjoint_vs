@@ -141,6 +141,26 @@ std::string short_control_name(const std::string& name)
     return out;
 }
 
+std::string control_config_key(const std::string& name)
+{
+    std::string out;
+    out.reserve(name.size());
+    bool last_was_sep = false;
+    for (char ch : name) {
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+            (ch >= '0' && ch <= '9')) {
+            out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+            last_was_sep = false;
+        } else if (!out.empty() && !last_was_sep) {
+            out.push_back('_');
+            last_was_sep = true;
+        }
+    }
+    while (!out.empty() && out.back() == '_')
+        out.pop_back();
+    return out;
+}
+
 #ifdef __linux__
 
 class V4L2ControlPanel {
@@ -230,7 +250,7 @@ public:
             return;
         out << "camera_controls:\n";
         for (const auto& ctrl : controls_)
-            out << "  " << short_control_name(ctrl.name) << ": "
+            out << "  " << control_config_key(ctrl.name) << ": "
                 << slider_to_control_value(ctrl) << "\n";
     }
 

@@ -30,6 +30,20 @@ double scalar_to_double(const YAML::Node& node, double fallback)
     return node.as<double>();
 }
 
+bool scalar_to_bool(const YAML::Node& node, bool fallback)
+{
+    if (!node)
+        return fallback;
+    return node.as<bool>();
+}
+
+std::string scalar_to_string(const YAML::Node& node, const std::string& fallback)
+{
+    if (!node)
+        return fallback;
+    return node.as<std::string>();
+}
+
 } // namespace
 
 AppConfig load_app_config(const std::string& path)
@@ -119,6 +133,12 @@ AppConfig load_app_config(const std::string& path)
         c.vision.blur_sigma = vis["blur_sigma"].as<double>();
     if (vis["equalize_hist"])
         c.vision.equalize_hist = vis["equalize_hist"].as<bool>();
+    if (const auto controls = y["camera_controls"]) {
+        for (const auto& entry : controls) {
+            c.vision.camera_controls.emplace_back(entry.first.as<std::string>(),
+                                                  scalar_to_int(entry.second, 0));
+        }
+    }
     for (int i = 0; i < 6; i++)
         c.vision.desired[i] = yd[i];
 
@@ -130,11 +150,106 @@ AppConfig load_app_config(const std::string& path)
                                                  c.motor.position_command);
         c.motor.pid_command = scalar_to_int(proto["pid_command"],
                                             c.motor.pid_command);
+        c.motor.feedback_command = scalar_to_int(proto["feedback_command"],
+                                                 c.motor.feedback_command);
+        c.motor.sequence = static_cast<uint8_t>(
+            scalar_to_int(proto["sequence"], c.motor.sequence) & 0xFF);
+        c.motor.address = static_cast<uint8_t>(
+            scalar_to_int(proto["address"], c.motor.address) & 0xFF);
+        if (proto["strict_address"])
+            c.motor.strict_address = proto["strict_address"].as<bool>();
+        if (proto["consume_command_response"]) {
+            c.motor.consume_command_response =
+                proto["consume_command_response"].as<bool>();
+        }
+        if (proto["debug_frames"])
+            c.motor.debug_frames = proto["debug_frames"].as<bool>();
         c.motor.position_counts_per_rev =
             scalar_to_double(proto["position_counts_per_rev"],
                              c.motor.position_counts_per_rev);
         c.motor.pid_scale = scalar_to_double(proto["pid_scale"],
                                              c.motor.pid_scale);
+    }
+
+    const auto task = y["task"];
+    if (task) {
+        c.task.enable_completion_check =
+            scalar_to_bool(task["enable_completion_check"],
+                           c.task.enable_completion_check);
+        c.task.image_error_tolerance_px =
+            scalar_to_double(task["image_error_tolerance_px"],
+                             c.task.image_error_tolerance_px);
+        c.task.velocity_tolerance_rad_s =
+            scalar_to_double(task["velocity_tolerance_rad_s"],
+                             c.task.velocity_tolerance_rad_s);
+        c.task.stable_frames_required =
+            scalar_to_int(task["stable_frames_required"],
+                          c.task.stable_frames_required);
+        c.task.max_runtime_s =
+            scalar_to_double(task["max_runtime_s"], c.task.max_runtime_s);
+        c.task.max_control_cycles =
+            scalar_to_int(task["max_control_cycles"],
+                          c.task.max_control_cycles);
+        c.task.return_to_zero_on_exit =
+            scalar_to_bool(task["return_to_zero_on_exit"],
+                           c.task.return_to_zero_on_exit);
+        c.task.return_zero_mode =
+            scalar_to_string(task["return_zero_mode"],
+                             c.task.return_zero_mode);
+        c.task.return_zero_joint_rad =
+            scalar_to_double(task["return_zero_joint_rad"],
+                             c.task.return_zero_joint_rad);
+        c.task.return_zero_motor_pos_rad =
+            scalar_to_double(task["return_zero_motor_pos_rad"],
+                             c.task.return_zero_motor_pos_rad);
+        c.task.return_to_zero_timeout_s =
+            scalar_to_double(task["return_to_zero_timeout_s"],
+                             c.task.return_to_zero_timeout_s);
+        c.task.max_vision_failures =
+            scalar_to_int(task["max_vision_failures"],
+                          c.task.max_vision_failures);
+        c.task.max_feedback_failures =
+            scalar_to_int(task["max_feedback_failures"],
+                          c.task.max_feedback_failures);
+        c.task.velocity_saturation_rad_s =
+            scalar_to_double(task["velocity_saturation_rad_s"],
+                             c.task.velocity_saturation_rad_s);
+        c.task.min_safe_angle_rad =
+            scalar_to_double(task["min_safe_angle_rad"],
+                             c.task.min_safe_angle_rad);
+        c.task.max_safe_angle_rad =
+            scalar_to_double(task["max_safe_angle_rad"],
+                             c.task.max_safe_angle_rad);
+        c.task.vision_boundary_margin_px =
+            scalar_to_double(task["vision_boundary_margin_px"],
+                             c.task.vision_boundary_margin_px);
+    }
+
+    const auto log = y["log"];
+    if (log) {
+        c.log.root_dir = scalar_to_string(log["root_dir"], c.log.root_dir);
+    }
+
+    const auto video = y["video"];
+    if (video) {
+        c.video.save_raw_video =
+            scalar_to_bool(video["save_raw_video"], c.video.save_raw_video);
+        c.video.save_annotated_video =
+            scalar_to_bool(video["save_annotated_video"],
+                           c.video.save_annotated_video);
+        c.video.raw_filename =
+            scalar_to_string(video["raw_filename"], c.video.raw_filename);
+        c.video.annotated_filename =
+            scalar_to_string(video["annotated_filename"],
+                             c.video.annotated_filename);
+        c.video.codec = scalar_to_string(video["codec"], c.video.codec);
+    }
+
+    const auto experiment = y["experiment"];
+    if (experiment) {
+        c.experiment.controller_mode =
+            scalar_to_string(experiment["controller_mode"],
+                             c.experiment.controller_mode);
     }
 
     return c;

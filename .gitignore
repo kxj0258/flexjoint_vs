@@ -12,6 +12,7 @@
 /Makefile
 /compile_commands.json
 /soft_robot_vs
+/data/log/
 
 # Object/library outputs
 *.o

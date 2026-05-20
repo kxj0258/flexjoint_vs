@@ -26,6 +26,12 @@ bool FeatureExtractor::open()
 
 bool FeatureExtractor::extract(float img_pos[6], int rad_out[3])
 {
+    return extract(img_pos, rad_out, nullptr, nullptr);
+}
+
+bool FeatureExtractor::extract(float img_pos[6], int rad_out[3],
+                               cv::Mat* raw_frame, cv::Mat* annotated_frame)
+{
     cv::Mat img;
     cap_ >> img;
     if (img.empty()) {
@@ -34,6 +40,8 @@ bool FeatureExtractor::extract(float img_pos[6], int rad_out[3])
     }
 
     const cv::Mat raw_view = img.clone();
+    if (raw_frame)
+        *raw_frame = raw_view.clone();
     cv::namedWindow("camera_raw", cv::WINDOW_AUTOSIZE);
     cv::imshow("camera_raw", raw_view);
 
@@ -52,6 +60,8 @@ bool FeatureExtractor::extract(float img_pos[6], int rad_out[3])
     if (circles.size() < 3) {
         cv::namedWindow("gu_result", cv::WINDOW_AUTOSIZE);
         cv::imshow("gu_result", img);
+        if (annotated_frame)
+            *annotated_frame = img.clone();
         cv::waitKey(5);
         fprintf(stderr, "FeatureExtractor: detected %zu circles, need 3\n", circles.size());
         return false;
@@ -61,6 +71,8 @@ bool FeatureExtractor::extract(float img_pos[6], int rad_out[3])
     if (!select_three_feature_circles(circles, selected)) {
         cv::namedWindow("gu_result", cv::WINDOW_AUTOSIZE);
         cv::imshow("gu_result", img);
+        if (annotated_frame)
+            *annotated_frame = img.clone();
         cv::waitKey(5);
         fprintf(stderr, "FeatureExtractor: cannot select 3 feature circles\n");
         return false;
@@ -70,6 +82,8 @@ bool FeatureExtractor::extract(float img_pos[6], int rad_out[3])
 
     cv::namedWindow("gu_result", cv::WINDOW_AUTOSIZE);
     cv::imshow("gu_result", img);
+    if (annotated_frame)
+        *annotated_frame = img.clone();
 
     // Save frame
     frame_count_++;

@@ -138,6 +138,64 @@ cmake --build build --config Release
 
 按 `Ctrl+C` 可安全退出，程序会在退出前刷新日志文件。
 
+### 论文 Section V-B 实验模式
+
+主程序通过 `experiment.controller_mode` 选择控制器模式。默认值为
+`proposed`，即现有双层视觉伺服控制器；不配置 `experiment` 段时也按
+`proposed` 运行。
+
+```yaml
+experiment:
+  controller_mode: "proposed"
+```
+
+可选模式：
+
+- `proposed`：完整自适应视觉伺服 + 快子系统振动抑制。
+- `proposed_no_fast`：消融试验；仍使用 `cal_joint_vel()`，但在分发层将快子系统增益 `K4` 临时置 0。
+- `baseline_pd`：工程基线对比；使用固定内参的 `cal_control()` PD 视觉伺服控制器。
+- `baseline_pd_no_fast`：PD 基线并禁用快子系统振动抑制。
+
+`config/` 下提供了可直接运行的完整配置文件。它们与主配置保持相同的
+硬件、视觉、目标点和安全参数，只改变 `experiment.controller_mode`：
+
+```bash
+cd build
+
+# 完整 proposed 控制器（默认）
+./flexjoint_vs ../config/robot_config.yaml
+
+# Section V-B 消融：去掉快子系统振动抑制
+./flexjoint_vs ../config/robot_config_proposed_no_fast.yaml
+
+# 工程基线：固定内参 PD 视觉伺服
+./flexjoint_vs ../config/robot_config_baseline_pd.yaml
+
+# 工程基线消融：PD 视觉伺服且去掉快子系统
+./flexjoint_vs ../config/robot_config_baseline_pd_no_fast.yaml
+```
+
+如果要临时调整相机曝光、目标点或安全阈值，建议从对应的
+`config/robot_config_*.yaml` 复制一份新文件，只改需要变化的字段，避免
+不同实验之间的硬件参数不一致。
+
+做对比或消融试验时，如果担心某个控制器无法收敛，可以设置
+`task.max_control_cycles`。该值为 `0` 时不限制循环次数；设为正数时，
+主循环处理到指定次数会自动以 `max_control_cycles` 原因退出，并继续执行
+发送零速度、回零、关闭视频和写入 `run_summary.md` 的收尾流程。
+
+完成多组实验后，把各次 `data/log/<timestamp>` 填入
+`data/experiments/example_manifest.yaml`，再生成对比图和汇总表：
+
+```bash
+python3 scripts/analyze_run.py --run data/log/<timestamp> --paper-style
+python3 scripts/compare_runs.py data/experiments/example_manifest.yaml --paper-style
+```
+
+`compare_runs.py` 会比较图像误差、特征点轨迹、控制输入，并输出快状态
+RMS/峰值指标，便于量化消融试验中的振动抑制差异。`baseline_pd` 是项目
+已有备用控制器形成的工程基线，不是论文参考文献 [18] 的严格复现。
+
 ### 摄像头实时检测与交互调参
 
 ```bash
@@ -209,16 +267,18 @@ cd build
 
 - `vel <rad_s>`：发送速度指令
 - `stop`：发送零速度
-- `read [timeout_ms]`：读取一次反馈
+- `read [timeout_ms]` / `readsys [timeout_ms]`：发送 `0x0B` 并读取系统实时数据
+- `read2f [timeout_ms]`：发送 `0x2F` 并读取旧编码器反馈
 - `monitor on|off`：开关后台反馈显示
 - `pos <rad>`：发送位置指令（需要先配置位置命令字）
 - `pid <kp> <ki> <kd>`：发送 PID 参数（需要先配置 PID 命令字）
 - `frame <cmd_hex> [bytes...]`：按项目的 `0x3E ... CRC` 帧格式构造并发送
 - `raw <bytes...>`：发送原始字节
-- `set poscmd|pidcmd|velcmd <hex|-1>`：运行时设置命令字
+- `set poscmd|pidcmd|velcmd|feedback <hex|-1>`：运行时设置命令字
+- `set address|sequence <hex>`、`set strictaddr|consume|debug on|off`：运行时调整协议调试参数
 - `set zerodeg|counts|pidscale <value>`：运行时设置编码器零点、位置每圈计数、PID 缩放
 
-反馈显示包含电机绝对位置、按 `encoder_zero_offset_deg` 换算后的关节位置和速度。当前仓库原始代码只明确给出了速度命令 `0x54` 和 15 字节反馈解析；位置/PID 命令字默认禁用，需要按实际电机控制器协议在 `motor_protocol` 中确认后开启。
+反馈显示包含电机绝对位置、按 `encoder_zero_offset_deg` 换算后的关节位置和速度。`read`/`monitor` 使用 `0x0B`，`read2f` 保留用于旧 `0x2F` 反馈调试；启用 `set debug on` 后会打印被跳过帧的命令码、payload 长度和 CRC/地址统计。
 
 ### 串口权限与端口名
 
@@ -258,6 +318,22 @@ camera:
   width: 640    # 分辨率宽
   height: 480   # 分辨率高
 ```
+
+### camera_controls — 相机驱动控制项
+
+```yaml
+camera_controls:
+  auto_exposure: 1
+  exposure_time_absolute: 157
+  white_balance_automatic: 0
+  white_balance_temperature: 4600
+  gain: 70
+  brightness: 16
+```
+
+- 仅 Linux 下通过 V4L2 自动应用；Windows 会忽略这段并打印提示。
+- 程序在打开相机后会按 YAML 中的书写顺序依次设置，因此像 `auto_exposure`、`white_balance_automatic` 这种模式开关建议写在依赖它们的具体数值前面。
+- `camera_feature_test` 按 `w` 保存的 `camera_controls` 可直接复制回 `config/robot_config.yaml`。
 
 ### control — 控制增益
 
@@ -305,12 +381,54 @@ vision:
 
 ```yaml
 motor_protocol:
+  address: 0x01                 # 电机设备地址，出厂默认 0x01
+  sequence: 0x00                # 包序号；电机应答会回显该值
+  feedback_command: 0x0B        # 主程序默认读取系统实时数据反馈
+  strict_address: false         # true 时丢弃地址不匹配的合法帧
+  consume_command_response: true # 发送 0x54/0x55 后短超时消费命令应答
+  debug_frames: false           # true 时打印跳过帧、CRC 错误等调试信息
   velocity_command: 0x54       # 已知速度指令命令字
-  position_command: -1         # 位置指令命令字，-1 表示禁用
+  position_command: 0x55       # 绝对位置指令命令字，-1 表示禁用
   pid_command: -1              # PID 参数指令命令字，-1 表示禁用
   position_counts_per_rev: 16384
   pid_scale: 1000
 ```
+
+RS485 V2.3 帧格式为 `header, seq, address, command, payload_len, payload, crc16_low, crc16_high`。主机发送 header 为 `0x3E`，电机应答 header 为 `0x3C`；`0x0B` 系统实时数据反馈包含单圈绝对值、多圈绝对值、机械速度、电压、电流、温度、故障码和运行状态。主程序默认只使用 `0x0B`；`0x2F` 仍保留给 `motor_test read2f` 或显式配置。
+
+### task — 任务停止条件与安全参数
+
+```yaml
+task:
+  enable_completion_check: true
+  image_error_tolerance_px: 5.0
+  velocity_tolerance_rad_s: 0.03
+  stable_frames_required: 30
+  max_runtime_s: 120.0
+  max_control_cycles: 0
+  velocity_saturation_rad_s: 1.5
+  min_safe_angle_rad: -1.0
+  max_safe_angle_rad: 1.0
+  vision_boundary_margin_px: 25.0
+```
+
+`max_runtime_s` 按运行时间限制实验，`max_control_cycles` 按主控制循环次数
+限制实验。两者都大于 0 时任一条件先满足都会触发自动退出。建议做不收敛
+风险较高的消融或基线实验时设置 `max_control_cycles`，例如 `600` 或
+`1000`；保留为 `0` 则只依赖收敛判断、运行时间和安全停止条件。
+
+### experiment — 实验控制器模式
+
+```yaml
+experiment:
+  controller_mode: "proposed"
+```
+
+`controller_mode` 用于复现实验中的完整控制、快子系统消融和基线对比。
+支持 `proposed`、`proposed_no_fast`、`baseline_pd`、
+`baseline_pd_no_fast`。其中 `*_no_fast` 不会改动 YAML 中的 `control.K4`，
+而是在控制器分发层复制一份 `ControlParams` 并临时置零，方便同一份配置
+在多组实验之间保持可比性。
 
 ### robot — 机器人物理参数
 
@@ -324,6 +442,15 @@ robot:
   camera_intrinsics: [487.05, 487.05, 338.23, 231.89]  # fx, fy, cx, cy
   camera_extrinsics: [...]        # 相机外参矩阵（行主序 3×4）
 ```
+
+零点换算公式：
+
+```text
+joint_position_rad = (single_turn_deg - encoder_zero_offset_deg) * pi / 180
+encoder_zero_offset_deg = single_turn_deg - q0 * 180 / pi
+```
+
+第二行用于把当前姿态标定为期望关节角 `q0`。例如希望当前姿态为 `initial_angle_rad`，先用 `motor_test read 1000` 读取 `single_turn_deg`，再按公式更新 `encoder_zero_offset_deg`。主程序首次读到真实反馈后，如果它与 `initial_angle_rad` 差异过大或已超出安全限位，会打印明确提示并在越限时发送 0 速度。
 
 ---
 
@@ -372,7 +499,7 @@ robot:
 
 ### `motor_client` — 电机命令与反馈
 
-封装速度命令帧、通用命令帧、原始字节发送和 15 字节编码器反馈解析。`flexjoint_vs` 和 `motor_test` 共用该模块，避免主程序和测试程序使用不同的速度换算或反馈解码逻辑。
+封装 RS485 V2.3 帧构造、CRC-16/MODBUS 校验、动态长度应答读取、速度命令和反馈解析。读取期望命令时会在超时时间内跳过 CRC 正确但命令码不匹配的帧，例如速度命令 `0x54` 的应答或迟到的旧反馈帧；`flexjoint_vs` 和 `motor_test` 共用该模块，避免主程序和测试程序使用不同的速度换算或反馈解码逻辑。
 
 ### `main` — 主程序
 
@@ -386,7 +513,7 @@ robot:
    - 调用控制器计算速度指令
    - 速度饱和限幅（±1.5 rad/s）
    - 发送 Modbus RTU 帧到电机
-   - 读取编码器反馈，解码关节角和角速度
+   - 读取 `0x0B` 系统实时数据反馈，解码关节角和角速度
    - 更新状态向量
 
 ---
@@ -395,21 +522,21 @@ robot:
 
 ### `dataFile.txt`
 
-每个控制周期写入一行，共 26 列，格式为空格分隔的浮点数：
+每个控制周期写入一行 CSV，包含原始反馈、图像点、26 维控制状态、发送到电机的速度指令和有效性标志。主要控制状态列含义如下：
 
 | 列索引 | 含义 |
 |--------|------|
-| 0 | 关节角（rad） |
-| 1 | 关节角速度（rad/s） |
-| 2–7 | 三个特征点图像坐标 u1,v1,u2,v2,u3,v3（像素） |
-| 8–11 | 自适应相机参数 theta[4] |
-| 12–16 | 鲁棒项参数 rho[5] |
-| 17–20 | 观测器状态 obs[4] |
-| 21 | 积分器状态 qc |
-| 22 | 速度控制指令（rad/s） |
-| 23 | 总力矩 tau |
-| 24 | 慢动态力矩 tau_s |
-| 25 | 快动态力矩 tau_f_c |
+| `state_joint_angle_rad` | 控制状态中的关节角（rad） |
+| `state_joint_velocity_rad_s` | 控制状态中的关节角速度（rad/s） |
+| `state_img_u1`–`state_img_v3` | 三个特征点图像坐标（像素） |
+| `state_theta_0`–`state_theta_3` | 自适应相机参数 theta[4] |
+| `state_rho_0`–`state_rho_4` | 鲁棒项参数 rho[5] |
+| `state_obs_0`–`state_obs_3` | 观测器状态 obs[4] |
+| `state_qc` | 积分器状态 qc |
+| `state_velocity_command_rad_s` | 控制状态中的速度指令（rad/s） |
+| `state_tau` | 总力矩 tau |
+| `state_tau_s` | 慢动态力矩 tau_s |
+| `state_tau_f_c` | 快动态力矩 tau_f_c |
 
 ### `data/frames/`
 
