@@ -3,12 +3,12 @@ serial:
   # Optional platform-specific overrides. If present, the program picks the
   # matching one at runtime; motor_port remains the fallback.
   linux_port: "/dev/ttyACM0"
-  windows_port: "COM8"
+  windows_port: "COM13"
   baud_rate: 115200
 
 camera:
-  index: 2
-  fps: 120
+  index: 1
+  fps: 30
   width: 640
   height: 480
 

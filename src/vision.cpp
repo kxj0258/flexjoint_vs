@@ -15,6 +15,8 @@ FeatureExtractor::~FeatureExtractor()
 {
     if (cap_.isOpened())
         cap_.release();
+    cv::destroyWindow("camera_raw");
+    cv::destroyWindow("gu_result");
 }
 
 bool FeatureExtractor::open()
@@ -31,6 +33,10 @@ bool FeatureExtractor::extract(float img_pos[6], int rad_out[3])
         return false;
     }
 
+    const cv::Mat raw_view = img.clone();
+    cv::namedWindow("camera_raw", cv::WINDOW_AUTOSIZE);
+    cv::imshow("camera_raw", raw_view);
+
     CircleDetectionConfig detect_cfg;
     detect_cfg.hough_dp       = cfg_.hough_dp;
     detect_cfg.hough_min_dist = cfg_.hough_min_dist;
@@ -44,12 +50,18 @@ bool FeatureExtractor::extract(float img_pos[6], int rad_out[3])
 
     std::vector<FeatureCircle> circles = detect_feature_circles(img, detect_cfg);
     if (circles.size() < 3) {
+        cv::namedWindow("gu_result", cv::WINDOW_AUTOSIZE);
+        cv::imshow("gu_result", img);
+        cv::waitKey(5);
         fprintf(stderr, "FeatureExtractor: detected %zu circles, need 3\n", circles.size());
         return false;
     }
 
     std::array<FeatureCircle, 3> selected;
     if (!select_three_feature_circles(circles, selected)) {
+        cv::namedWindow("gu_result", cv::WINDOW_AUTOSIZE);
+        cv::imshow("gu_result", img);
+        cv::waitKey(5);
         fprintf(stderr, "FeatureExtractor: cannot select 3 feature circles\n");
         return false;
     }

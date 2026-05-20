@@ -1,5 +1,10 @@
 # Build artifacts
 /build/
+/build-vcpkg/
+/build-conda-vs/
+/out/
+/.vs/
+/scripts/
 /cmake-build-*/
 /CMakeFiles/
 /CMakeCache.txt
@@ -23,6 +28,7 @@
 /dataFile.txt
 /data/frames/*
 !/data/frames/.gitkeep
+/.cache/
 
 # IDE and OS files
 .vscode/
