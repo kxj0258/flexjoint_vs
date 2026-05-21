@@ -30,24 +30,24 @@ control:
   B: 0.000049
   K2: 0.001
   Gamma: 0.0001
-  K4: 2.7
+  K4: 1.0
   eps: 0.1
   Kq: 50.0
-  cmd_c1: 1.5
-  cmd_c2: 0.325
+  cmd_c1: 1.0
+  cmd_c2: 0.6
   K_dtk_I: 0.8
   omega_dtk: 0.6
   h: 0.04
   Mr: 1.0
   Jm: 1.0
   Kp: 5.0
-  Kd: 0.35
+  Kd: 0.37
   Ps: [10.0, 15.0, 10.0, 6.0]
   mu_rho: [0.01, 0.0001, 0.01, 0.001, 0.001]
 
 vision:
   # desired_coords: [264.5, 96.5, 298.5, 166.5, 174.5, 144.5]
-  desired_coords: [266.5, 125.5, 313.5, 202.5, 180.5, 179.5]
+  desired_coords: [266.5, 125.5, 313.5, 202.5, 179.5, 178.5]
   save_path: "data/frames/"
   hough_dp: 1.0
   hough_min_dist: 30.0
@@ -79,8 +79,8 @@ task:
   image_error_tolerance_px: 5.0
   velocity_tolerance_rad_s: 0.03
   stable_frames_required: 30
-  max_runtime_s: 120.0
-  max_control_cycles: 0
+  max_runtime_s: 60.0
+  max_control_cycles: 1000
   return_to_zero_on_exit: true
   # motor_pos_rad matches motor_test command "pos 0"; joint_rad uses
   # encoder_zero_offset_deg to return to a joint angle.

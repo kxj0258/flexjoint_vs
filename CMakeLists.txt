@@ -43,11 +43,12 @@ target_link_libraries(flexjoint_common PUBLIC
     ${YAML_CPP_TARGET}
 )
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
+    target_link_libraries(flexjoint_common PUBLIC stdc++fs)
+endif()
+
 add_executable(flexjoint_vs src/main.cpp)
 target_link_libraries(flexjoint_vs PRIVATE flexjoint_common)
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
-    target_link_libraries(flexjoint_vs PRIVATE stdc++fs)
-endif()
 
 add_executable(camera_feature_test src/camera_feature_test.cpp)
 target_link_libraries(camera_feature_test PRIVATE flexjoint_common)

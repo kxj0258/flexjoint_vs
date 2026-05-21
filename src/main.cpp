@@ -52,7 +52,7 @@ using Clock = std::chrono::steady_clock;
 using WallClock = std::chrono::system_clock;
 
 constexpr double kPi = 3.14159265358979323846;
-constexpr int kFeedbackPollEvery = 3;
+constexpr int kFeedbackPollEvery = 1;
 constexpr int kFeedbackTimeoutMs = 200;
 constexpr int kFeedbackWarnEvery = 30;
 constexpr float kInitialAngleWarnRad = 0.25f;
@@ -822,15 +822,23 @@ int main(int argc, char* argv[])
     summary.raw_video_path = summary.log_dir / cfg.video.raw_filename;
     summary.annotated_video_path = summary.log_dir / cfg.video.annotated_filename;
 
-    std::error_code copy_ec;
-    fs::copy_file(weakly_canonical_or_absolute(argv[1]), summary.config_copy_path,
-                  fs::copy_options::overwrite_existing, copy_ec);
-    summary.config_copy_ok = !copy_ec;
-    if (copy_ec) {
-        summary.config_copy_error = copy_ec.message();
-        warn(summary, "cannot copy config to " +
+    try {
+        std::ofstream config_copy(summary.config_copy_path.string());
+        if (!config_copy.is_open()) {
+            summary.config_copy_error = "cannot open output file";
+        } else {
+            config_copy << load_resolved_app_config_text(argv[1]);
+            summary.config_copy_ok = static_cast<bool>(config_copy);
+            if (!summary.config_copy_ok)
+                summary.config_copy_error = "write failed";
+        }
+    } catch (const std::exception& e) {
+        summary.config_copy_error = e.what();
+    }
+    if (!summary.config_copy_ok) {
+        warn(summary, "cannot write resolved config to " +
                       summary.config_copy_path.string() + ": " +
-                      copy_ec.message());
+                      summary.config_copy_error);
     }
 
     std::string frame_dir_error;
@@ -1035,6 +1043,11 @@ int main(int argc, char* argv[])
     while (g_running) {
         const auto loop_wall = WallClock::now();
         const auto loop_steady = Clock::now();
+        double feedback_ms = 0.0;
+        bool feedback_polled = false;
+        double raw_video_ms = 0.0;
+        double annotated_video_ms = 0.0;
+        double send_cmd_ms = 0.0;
         const double elapsed_s =
             std::chrono::duration<double>(loop_steady - summary.start_steady).count();
         if (cfg.task.max_runtime_s > 0.0 && elapsed_s >= cfg.task.max_runtime_s) {
@@ -1052,12 +1065,17 @@ int main(int argc, char* argv[])
         bool feedback_ok_for_log = have_feedback && feedback_fail_streak == 0;
         ++frame_counter;
 
-        if (frame_counter % kFeedbackPollEvery == 1) {
+        if (frame_counter % kFeedbackPollEvery == 0) {
             MotorFeedback feedback;
+            feedback_polled = true;
+            const auto feedback_start = Clock::now();
             const bool feedback_ok =
                 read_configured_feedback(motor, cfg.motor,
                                          cfg.encoder_zero_offset_deg, feedback,
                                          kFeedbackTimeoutMs, true);
+            feedback_ms =
+                std::chrono::duration<double, std::milli>(
+                    Clock::now() - feedback_start).count();
             const MotorReadStats stats = motor.last_read_stats();
             feedback_ok_for_log = feedback_ok;
             if (feedback_ok) {
@@ -1144,10 +1162,18 @@ int main(int argc, char* argv[])
         int rad_new[3] = {};
         cv::Mat raw_frame;
         cv::Mat annotated_frame;
+        const auto vision_start = Clock::now();
         const bool vision_ok =
             extractor.extract(img_pos, rad_new, &raw_frame, &annotated_frame);
+        const double vision_feature_ms =
+            std::chrono::duration<double, std::milli>(
+                Clock::now() - vision_start).count();
+        const auto raw_video_start = Clock::now();
         write_video_frame(raw_video, raw_frame, cfg.vision.fps,
                           cfg.video.codec, summary);
+        raw_video_ms =
+            std::chrono::duration<double, std::milli>(
+                Clock::now() - raw_video_start).count();
 
         if (!vision_ok) {
             ++vision_fail_streak;
@@ -1191,13 +1217,9 @@ int main(int argc, char* argv[])
         previous_img_time_s = elapsed_s;
         have_previous_img = true;
 
-        printf("circles: (%.1f,%.1f,r=%d) (%.1f,%.1f,r=%d) (%.1f,%.1f,r=%d)\n",
-               img_pos[0], img_pos[1], rad_new[0],
-               img_pos[2], img_pos[3], rad_new[1],
-               img_pos[4], img_pos[5], rad_new[2]);
-
         float joint_cal = 0.0f;
         float para_update[17] = {};
+        const auto control_start = Clock::now();
         run_controller_step(controller_mode, cfg.ctrl, joint_state, img_pos,
                             obs, para_slow, q_c, ydif, &joint_cal,
                             para_update);
@@ -1245,6 +1267,14 @@ int main(int argc, char* argv[])
             if (close_to_target && slow_enough) {
                 ++stable_frames;
             } else {
+                if(close_to_target == false)
+                {
+                    printf("rms out tolerance: %f\n", rms);
+                };
+                if(slow_enough == false)
+                {
+                    printf("vel out tolerance: %f\n", vel_rad_s);
+                };
                 stable_frames = 0;
             }
             if (stable_frames >= std::max(1, cfg.task.stable_frames_required)) {
@@ -1252,13 +1282,20 @@ int main(int argc, char* argv[])
                 task_completed = true;
             }
         }
+        const double control_compute_ms =
+            std::chrono::duration<double, std::milli>(
+                Clock::now() - control_start).count();
 
-        printf("vel_cmd=%.4f rad/s (joint_cal=%.4f)\n", velocity, joint_cal);
+        // printf("vel_cmd=%.4f rad/s (joint_cal=%.4f)\n", velocity, joint_cal);
 
+        const auto send_cmd_start = Clock::now();
         const bool command_ok = motor.send_velocity_rad_s(velocity);
+        send_cmd_ms =
+            std::chrono::duration<double, std::milli>(
+                Clock::now() - send_cmd_start).count();
         if (!command_ok)
             warn(summary, "failed to send velocity command");
-        printf("angle=%.4f rad  vel=%.4f rad/s\n", angle_rad, vel_rad_s);
+        // printf("angle=%.4f rad  vel=%.4f rad/s\n", angle_rad, vel_rad_s);
 
         for (int i = 0; i < 6; i++) {
             state[2 + i] = img_pos[i];
@@ -1276,8 +1313,12 @@ int main(int argc, char* argv[])
         state[24] = para_update[15];
         state[25] = para_update[16];
 
+        const auto annotated_video_start = Clock::now();
         write_video_frame(annotated_video, annotated_frame, cfg.vision.fps,
                           cfg.video.codec, summary);
+        annotated_video_ms =
+            std::chrono::duration<double, std::milli>(
+                Clock::now() - annotated_video_start).count();
 
         write_data_row(dataFile, frame_counter, elapsed_s,
                        unix_time_seconds(loop_wall), state, img_pos,
@@ -1285,6 +1326,18 @@ int main(int argc, char* argv[])
                        safety_reason);
         update_summary_last_values(summary, state, img_pos, velocity, joint_cal,
                                    feedback_ok_for_log, true, safety_reason);
+
+        const double loop_ms =
+            std::chrono::duration<double, std::milli>(
+                Clock::now() - loop_steady).count();
+        const double loop_hz = loop_ms > 0.0 ? 1000.0 / loop_ms : 0.0;
+        printf("circles: (%.1f,%.1f,r=%d) (%.1f,%.1f,r=%d) (%.1f,%.1f,r=%d) loop_hz=%.2f loop_ms=%.2f feedback_polled=%d feedback_ms=%.2f vision_ms=%.2f raw_video_ms=%.2f control_ms=%.3f send_cmd_ms=%.2f annotated_video_ms=%.2f\n",
+               img_pos[0], img_pos[1], rad_new[0],
+               img_pos[2], img_pos[3], rad_new[1],
+               img_pos[4], img_pos[5], rad_new[2],
+               loop_hz, loop_ms, feedback_polled ? 1 : 0, feedback_ms,
+               vision_feature_ms, raw_video_ms, control_compute_ms,
+               send_cmd_ms, annotated_video_ms);
 
         if (task_completed) {
             exit_reason = ExitReason::TaskCompleted;

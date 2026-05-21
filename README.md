@@ -156,8 +156,10 @@ experiment:
 - `baseline_pd`：工程基线对比；使用固定内参的 `cal_control()` PD 视觉伺服控制器。
 - `baseline_pd_no_fast`：PD 基线并禁用快子系统振动抑制。
 
-`config/` 下提供了可直接运行的完整配置文件。它们与主配置保持相同的
-硬件、视觉、目标点和安全参数，只改变 `experiment.controller_mode`：
+`config/` 下提供了可直接运行的实验配置文件。`robot_config.yaml` 是唯一的
+公共参数来源；其它实验配置通过 `extends: robot_config.yaml` 继承它，只覆盖
+`experiment.controller_mode`。因此相机、目标点、安全阈值或控制增益只需要
+改 `robot_config.yaml` 一处，所有实验模式会同步生效：
 
 ```bash
 cd build
@@ -175,9 +177,22 @@ cd build
 ./flexjoint_vs ../config/robot_config_baseline_pd_no_fast.yaml
 ```
 
-如果要临时调整相机曝光、目标点或安全阈值，建议从对应的
-`config/robot_config_*.yaml` 复制一份新文件，只改需要变化的字段，避免
-不同实验之间的硬件参数不一致。
+如果某个实验确实需要单独覆盖参数，可以在对应的
+`config/robot_config_*.yaml` 中添加同名 YAML 段。例如只给 PD 基线降低速度
+上限：
+
+```yaml
+extends: robot_config.yaml
+
+experiment:
+  controller_mode: "baseline_pd"
+
+task:
+  velocity_saturation_rad_s: 1.0
+```
+
+程序运行时会把继承后的完整配置写入日志目录的 `run_config.yaml`，因此后续
+离线分析仍然读取完整配置，不依赖原始覆盖文件。
 
 做对比或消融试验时，如果担心某个控制器无法收敛，可以设置
 `task.max_control_cycles`。该值为 `0` 时不限制循环次数；设为正数时，
@@ -420,15 +435,18 @@ task:
 ### experiment — 实验控制器模式
 
 ```yaml
+extends: robot_config.yaml
+
 experiment:
   controller_mode: "proposed"
 ```
 
-`controller_mode` 用于复现实验中的完整控制、快子系统消融和基线对比。
-支持 `proposed`、`proposed_no_fast`、`baseline_pd`、
+`extends` 是项目配置加载器支持的继承字段，路径相对于当前 YAML 文件所在
+目录。覆盖文件中的字段会递归覆盖父配置中的同名字段；未写出的字段继续
+使用父配置。`controller_mode` 用于复现实验中的完整控制、快子系统消融和
+基线对比，支持 `proposed`、`proposed_no_fast`、`baseline_pd`、
 `baseline_pd_no_fast`。其中 `*_no_fast` 不会改动 YAML 中的 `control.K4`，
-而是在控制器分发层复制一份 `ControlParams` 并临时置零，方便同一份配置
-在多组实验之间保持可比性。
+而是在控制器分发层复制一份 `ControlParams` 并临时置零。
 
 ### robot — 机器人物理参数
 

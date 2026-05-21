@@ -1,12 +1,101 @@
 #include "app_config.hpp"
 
 #include <cstdlib>
+#include <set>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+#if __has_include(<filesystem>)
+#include <filesystem>
+#define FLEXJOINT_APP_CONFIG_HAVE_STD_FILESYSTEM 1
+#elif __has_include(<experimental/filesystem>)
+#include <experimental/filesystem>
+#define FLEXJOINT_APP_CONFIG_HAVE_EXPERIMENTAL_FILESYSTEM 1
+#else
+#error "C++17 filesystem support is required"
+#endif
 
 #include <yaml-cpp/yaml.h>
 
 namespace {
+
+#if defined(FLEXJOINT_APP_CONFIG_HAVE_STD_FILESYSTEM)
+namespace fs = std::filesystem;
+#else
+namespace fs = std::experimental::filesystem;
+#endif
+
+YAML::Node clone_node(const YAML::Node& node)
+{
+    return YAML::Clone(node);
+}
+
+YAML::Node merge_yaml_nodes(const YAML::Node& base, const YAML::Node& overlay)
+{
+    if (!base || !base.IsMap() || !overlay || !overlay.IsMap())
+        return clone_node(overlay ? overlay : base);
+
+    YAML::Node merged = clone_node(base);
+    for (const auto& entry : overlay) {
+        const std::string key = entry.first.as<std::string>();
+        if (key == "extends")
+            continue;
+
+        const YAML::Node base_child = merged[key];
+        const YAML::Node overlay_child = entry.second;
+        if (base_child && base_child.IsMap() && overlay_child.IsMap()) {
+            merged[key] = merge_yaml_nodes(base_child, overlay_child);
+        } else {
+            merged[key] = clone_node(overlay_child);
+        }
+    }
+    return merged;
+}
+
+fs::path absolute_config_path(const fs::path& path)
+{
+    const fs::path abs_path = path.is_absolute() ? path : fs::absolute(path);
+#if defined(FLEXJOINT_APP_CONFIG_HAVE_STD_FILESYSTEM)
+    return abs_path.lexically_normal();
+#else
+    return abs_path;
+#endif
+}
+
+YAML::Node load_resolved_yaml_impl(const fs::path& path,
+                                   std::set<std::string>& include_stack)
+{
+    const fs::path abs_path = absolute_config_path(path);
+    const std::string key = abs_path.string();
+    if (!include_stack.insert(key).second) {
+        throw std::runtime_error("cyclic YAML extends detected at " + key);
+    }
+
+    YAML::Node current = YAML::LoadFile(key);
+    if (!current || !current.IsMap()) {
+        throw std::runtime_error("config file must contain a YAML mapping: " + key);
+    }
+
+    YAML::Node resolved = clone_node(current);
+    if (const YAML::Node extends = current["extends"]) {
+        const fs::path parent_path = abs_path.parent_path() /
+            extends.as<std::string>();
+        YAML::Node parent = load_resolved_yaml_impl(parent_path, include_stack);
+        resolved = merge_yaml_nodes(parent, current);
+    }
+    resolved.remove("extends");
+
+    include_stack.erase(key);
+    return resolved;
+}
+
+YAML::Node load_resolved_yaml(const std::string& path)
+{
+    std::set<std::string> include_stack;
+    return load_resolved_yaml_impl(path, include_stack);
+}
 
 int scalar_to_int(const YAML::Node& node, int fallback)
 {
@@ -48,7 +137,7 @@ std::string scalar_to_string(const YAML::Node& node, const std::string& fallback
 
 AppConfig load_app_config(const std::string& path)
 {
-    YAML::Node y = YAML::LoadFile(path);
+    YAML::Node y = load_resolved_yaml(path);
     AppConfig c;
 
     const auto serial = y["serial"];
@@ -253,4 +342,13 @@ AppConfig load_app_config(const std::string& path)
     }
 
     return c;
+}
+
+std::string load_resolved_app_config_text(const std::string& path)
+{
+    YAML::Emitter out;
+    out << load_resolved_yaml(path);
+    std::ostringstream text;
+    text << out.c_str() << '\n';
+    return text.str();
 }

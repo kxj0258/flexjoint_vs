@@ -57,3 +57,4 @@ struct AppConfig {
 };
 
 AppConfig load_app_config(const std::string& path);
+std::string load_resolved_app_config_text(const std::string& path);
