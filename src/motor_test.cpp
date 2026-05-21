@@ -66,7 +66,12 @@ void print_help()
     printf("  stop                        send zero velocity\n");
     printf("  pos <rad>                   send position command if configured\n");
     printf("  poscnt <count>              send 0x55 absolute position count\n");
-    printf("  pid <kp> <ki> <kd>          send PID command if configured\n");
+    printf("  pid <kp> <ki> <kd>          send legacy PID command if configured\n");
+    printf("  readpid [timeout_ms]        read saved 0x0C system/PID parameters\n");
+    printf("  writepid <pos_kp> <vel_kp> <vel_ki> [timeout_ms]\n");
+    printf("                              write PID params with 0x0D, not saved to flash\n");
+    printf("  savepid <pos_kp> <vel_kp> <vel_ki> [timeout_ms]\n");
+    printf("                              save PID params with 0x0E to flash\n");
     printf("  read [timeout_ms]           send 0x0B and read 20-byte system status\n");
     printf("  read2f [timeout_ms]         read legacy 15-byte 0x2F feedback packet\n");
     printf("  readsys [timeout_ms]        alias of read\n");
@@ -196,6 +201,26 @@ void print_protocol(const MotorProtocolConfig& cfg)
         printf("  pidcmd=0x%02X\n", cfg.pid_command);
     else
         printf("  pidcmd=disabled\n");
+}
+
+void print_system_params(const MotorSystemParams& params)
+{
+    printf("[params] addr=0x%02X current_limit=%.3fA(raw=%u) "
+           "max_voltage=%.3fV(raw=%u) baud_raw=0x%02X\n",
+           static_cast<unsigned>(params.device_address),
+           static_cast<double>(params.current_threshold_raw) * 0.03,
+           static_cast<unsigned>(params.current_threshold_raw),
+           static_cast<double>(params.max_voltage_threshold_raw) * 0.2,
+           static_cast<unsigned>(params.max_voltage_threshold_raw),
+           static_cast<unsigned>(params.baud_config_raw));
+    printf("         position_kp=%.6g position_target_speed=%.6g (0.1RPM)\n",
+           params.position_kp, params.position_target_speed_rpm10);
+    printf("         velocity_kp=%.6g velocity_ki=%.6g reserved=%.6g\n",
+           params.velocity_kp, params.velocity_ki, params.reserved);
+    printf("         velocity_filter=%.3f(raw=%u) power_percent=%u\n",
+           static_cast<double>(params.velocity_filter_raw) / 100.0,
+           static_cast<unsigned>(params.velocity_filter_raw),
+           static_cast<unsigned>(params.power_percent));
 }
 
 void print_read_stats(const MotorReadStats& stats)
@@ -382,6 +407,66 @@ int main(int argc, char* argv[])
                 std::lock_guard<std::mutex> lock(port_mutex);
                 if (motor.send_pid(kp, ki, kd))
                     printf("sent pid %.6f %.6f %.6f\n", kp, ki, kd);
+            } else if (cmd == "readpid" || cmd == "readparams") {
+                int timeout_ms = 1000;
+                iss >> timeout_ms;
+                MotorSystemParams params;
+                bool ok = false;
+                {
+                    std::lock_guard<std::mutex> lock(port_mutex);
+                    ok = motor.read_system_params(params, timeout_ms);
+                }
+                if (ok) {
+                    clear_monitor_line(monitor_state);
+                    print_system_params(params);
+                    print_read_stats(motor.last_read_stats());
+                } else {
+                    fprintf(stderr,
+                            "readpid timeout/no response on 0x0C\n");
+                    print_read_stats(motor.last_read_stats());
+                }
+            } else if (cmd == "writepid" || cmd == "savepid") {
+                const bool save_to_flash = cmd == "savepid";
+                double position_kp = 0.0;
+                double velocity_kp = 0.0;
+                double velocity_ki = 0.0;
+                if (!(iss >> position_kp >> velocity_kp >> velocity_ki)) {
+                    throw std::runtime_error(
+                        save_to_flash ?
+                            "usage: savepid <pos_kp> <vel_kp> <vel_ki> [timeout_ms]" :
+                            "usage: writepid <pos_kp> <vel_kp> <vel_ki> [timeout_ms]");
+                }
+                int timeout_ms = 1000;
+                iss >> timeout_ms;
+
+                MotorSystemParams params;
+                MotorSystemParams echoed;
+                bool ok = false;
+                {
+                    std::lock_guard<std::mutex> lock(port_mutex);
+                    ok = motor.read_system_params(params, timeout_ms);
+                    if (ok) {
+                        params.position_kp = static_cast<float>(position_kp);
+                        params.velocity_kp = static_cast<float>(velocity_kp);
+                        params.velocity_ki = static_cast<float>(velocity_ki);
+                        ok = motor.write_system_params(params, save_to_flash,
+                                                       timeout_ms, false,
+                                                       &echoed);
+                    }
+                }
+                if (ok) {
+                    clear_monitor_line(monitor_state);
+                    printf("%s PID params via 0x%02X%s\n",
+                           save_to_flash ? "saved" : "wrote",
+                           save_to_flash ? 0x0E : 0x0D,
+                           save_to_flash ? " (flash)" : " (not persisted)");
+                    print_system_params(echoed);
+                    print_read_stats(motor.last_read_stats());
+                } else {
+                    fprintf(stderr, "%s timeout/no response\n",
+                            save_to_flash ? "savepid" : "writepid");
+                    print_read_stats(motor.last_read_stats());
+                }
             } else if (cmd == "read") {
                 int timeout_ms = 1000;
                 iss >> timeout_ms;

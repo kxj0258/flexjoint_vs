@@ -60,6 +60,20 @@ struct MotorFeedback {
     bool   system_status_valid   = false;
 };
 
+struct MotorSystemParams {
+    uint8_t device_address = 0;
+    uint8_t current_threshold_raw = 0;
+    uint8_t max_voltage_threshold_raw = 0;
+    uint8_t baud_config_raw = 0;
+    float position_kp = 0.0f;
+    float position_target_speed_rpm10 = 0.0f;
+    float velocity_kp = 0.0f;
+    float velocity_ki = 0.0f;
+    float reserved = 0.0f;
+    uint8_t velocity_filter_raw = 0;
+    uint8_t power_percent = 0;
+};
+
 std::vector<uint8_t> build_motor_frame(uint8_t command,
                                        const std::vector<uint8_t>& payload);
 std::vector<uint8_t> build_motor_frame(uint8_t command,
@@ -85,6 +99,11 @@ public:
     bool read_feedback_command(uint8_t command, double encoder_zero_deg,
                                MotorFeedback& feedback, int timeout_ms,
                                bool quiet = false);
+    bool read_system_params(MotorSystemParams& params, int timeout_ms,
+                            bool quiet = false);
+    bool write_system_params(const MotorSystemParams& params, bool save_to_flash,
+                             int timeout_ms, bool quiet = false,
+                             MotorSystemParams* echoed_params = nullptr);
     bool read_frame(uint8_t expected_command, MotorFrame& frame,
                     int timeout_ms, bool quiet = false,
                     MotorReadStats* stats = nullptr);

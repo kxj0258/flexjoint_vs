@@ -286,14 +286,17 @@ cd build
 - `read2f [timeout_ms]`：发送 `0x2F` 并读取旧编码器反馈
 - `monitor on|off`：开关后台反馈显示
 - `pos <rad>`：发送位置指令（需要先配置位置命令字）
-- `pid <kp> <ki> <kd>`：发送 PID 参数（需要先配置 PID 命令字）
+- `pid <kp> <ki> <kd>`：发送旧式 PID 参数命令（需要先配置 `pid_command`）
+- `readpid [timeout_ms]`：按协议 `0x0C` 读取电机保存的系统/PID 参数
+- `writepid <pos_kp> <vel_kp> <vel_ki> [timeout_ms]`：按协议 `0x0D` 写入 PID 参数，不保存到 Flash
+- `savepid <pos_kp> <vel_kp> <vel_ki> [timeout_ms]`：按协议 `0x0E` 写入 PID 参数并保存到 Flash
 - `frame <cmd_hex> [bytes...]`：按项目的 `0x3E ... CRC` 帧格式构造并发送
 - `raw <bytes...>`：发送原始字节
 - `set poscmd|pidcmd|velcmd|feedback <hex|-1>`：运行时设置命令字
 - `set address|sequence <hex>`、`set strictaddr|consume|debug on|off`：运行时调整协议调试参数
 - `set zerodeg|counts|pidscale <value>`：运行时设置编码器零点、位置每圈计数、PID 缩放
 
-反馈显示包含电机绝对位置、按 `encoder_zero_offset_deg` 换算后的关节位置和速度。`read`/`monitor` 使用 `0x0B`，`read2f` 保留用于旧 `0x2F` 反馈调试；启用 `set debug on` 后会打印被跳过帧的命令码、payload 长度和 CRC/地址统计。
+反馈显示包含电机绝对位置、按 `encoder_zero_offset_deg` 换算后的关节位置和速度。`read`/`monitor` 使用 `0x0B`，`read2f` 保留用于旧 `0x2F` 反馈调试；`readpid` 会显示协议系统参数中的位置环 `Kp`、速度环 `Kp/Ki`、目标速度、滤波系数和功率百分比等字段。`writepid`/`savepid` 会先读取当前 `0x0C` 系统参数，只替换 PID 相关的三个 Float 字段，再按 `0x0D` 或 `0x0E` 发回完整 26 字节参数，避免覆盖电流阈值、地址、波特率、功率等其它配置。启用 `set debug on` 后会打印被跳过帧的命令码、payload 长度和 CRC/地址统计。
 
 ### 串口权限与端口名
 
@@ -410,6 +413,8 @@ motor_protocol:
 ```
 
 RS485 V2.3 帧格式为 `header, seq, address, command, payload_len, payload, crc16_low, crc16_high`。主机发送 header 为 `0x3E`，电机应答 header 为 `0x3C`；`0x0B` 系统实时数据反馈包含单圈绝对值、多圈绝对值、机械速度、电压、电流、温度、故障码和运行状态。主程序默认只使用 `0x0B`；`0x2F` 仍保留给 `motor_test read2f` 或显式配置。
+
+协议中的 PID 参数位于 `0x0C/0x0D/0x0E` 系统参数 26 字节 payload 内：位置环 `Kp` 是第 4-7 字节 Float，位置闭环目标速度是第 8-11 字节 Float，速度环 `Kp` 是第 12-15 字节 Float，速度环 `Ki` 是第 16-19 字节 Float。`motor_test readpid` 用 `0x0C` 读取这些字段，`writepid` 用 `0x0D` 临时写入，`savepid` 用 `0x0E` 写入并保存到 Flash。协议 V2.3 未给出速度环 `Kd` 字段，因此这三个新命令只处理 `pos_kp`、`vel_kp` 和 `vel_ki`。
 
 ### task — 任务停止条件与安全参数
 

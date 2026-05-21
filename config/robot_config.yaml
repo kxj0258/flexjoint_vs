@@ -76,11 +76,11 @@ motor_protocol:
 
 task:
   enable_completion_check: true
-  image_error_tolerance_px: 5.0
-  velocity_tolerance_rad_s: 0.03
-  stable_frames_required: 30
-  max_runtime_s: 60.0
-  max_control_cycles: 1000
+  image_error_tolerance_px: 3.0
+  velocity_tolerance_rad_s: 0.05
+  stable_frames_required: 150
+  max_runtime_s: 30.0
+  max_control_cycles: 600
   return_to_zero_on_exit: true
   # motor_pos_rad matches motor_test command "pos 0"; joint_rad uses
   # encoder_zero_offset_deg to return to a joint angle.

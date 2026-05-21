@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -17,8 +18,12 @@ constexpr uint8_t kFrameHeaderMotor = 0x3C;
 constexpr uint8_t kDefaultSequence  = 0x00;
 constexpr uint8_t kDefaultAddress   = 0x01;
 constexpr uint8_t kCmdReadSystemStatus = 0x0B;
+constexpr uint8_t kCmdReadSystemParams = 0x0C;
+constexpr uint8_t kCmdWriteSystemParams = 0x0D;
+constexpr uint8_t kCmdSaveSystemParams = 0x0E;
 constexpr uint8_t kCmdReadLegacyFeedback = 0x2F;
 constexpr uint8_t kSystemStatusPayloadLen = 0x0D;
+constexpr uint8_t kSystemParamsPayloadLen = 0x1A;
 constexpr uint8_t kLegacyFeedbackPayloadLen = 0x08;
 constexpr int kMaxPayloadLen = 60;
 
@@ -35,6 +40,14 @@ void append_u32_le(std::vector<uint8_t>& out, uint32_t value)
     out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
+}
+
+void append_float_le(std::vector<uint8_t>& out, float value)
+{
+    uint32_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value), "float must be 32-bit");
+    std::memcpy(&bits, &value, sizeof(bits));
+    append_u32_le(out, bits);
 }
 
 uint16_t read_u16_le(const uint8_t* data)
@@ -59,6 +72,15 @@ uint32_t read_u32_le(const uint8_t* data)
 int32_t read_i32_le(const uint8_t* data)
 {
     return static_cast<int32_t>(read_u32_le(data));
+}
+
+float read_float_le(const uint8_t* data)
+{
+    const uint32_t bits = read_u32_le(data);
+    float value = 0.0f;
+    static_assert(sizeof(bits) == sizeof(value), "float must be 32-bit");
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
 }
 
 bool valid_command(int command)
@@ -205,6 +227,40 @@ void parse_encoder_feedback(double encoder_zero_deg, const MotorFrame& frame,
                          read_i32_le(data + 2),
                          read_i16_le(data + 6),
                          feedback);
+}
+
+void parse_system_params(const MotorFrame& frame, MotorSystemParams& params)
+{
+    const uint8_t* data = frame.payload.data();
+    params.device_address = data[0];
+    params.current_threshold_raw = data[1];
+    params.max_voltage_threshold_raw = data[2];
+    params.baud_config_raw = data[3];
+    params.position_kp = read_float_le(data + 4);
+    params.position_target_speed_rpm10 = read_float_le(data + 8);
+    params.velocity_kp = read_float_le(data + 12);
+    params.velocity_ki = read_float_le(data + 16);
+    params.reserved = read_float_le(data + 20);
+    params.velocity_filter_raw = data[24];
+    params.power_percent = data[25];
+}
+
+std::vector<uint8_t> build_system_params_payload(const MotorSystemParams& params)
+{
+    std::vector<uint8_t> payload;
+    payload.reserve(kSystemParamsPayloadLen);
+    payload.push_back(params.device_address);
+    payload.push_back(params.current_threshold_raw);
+    payload.push_back(params.max_voltage_threshold_raw);
+    payload.push_back(params.baud_config_raw);
+    append_float_le(payload, params.position_kp);
+    append_float_le(payload, params.position_target_speed_rpm10);
+    append_float_le(payload, params.velocity_kp);
+    append_float_le(payload, params.velocity_ki);
+    append_float_le(payload, params.reserved);
+    payload.push_back(params.velocity_filter_raw);
+    payload.push_back(params.power_percent);
+    return payload;
 }
 
 } // namespace
@@ -381,6 +437,50 @@ bool MotorClient::read_feedback_command(uint8_t command, double encoder_zero_deg
     feedback.fault_code          = 0;
     feedback.run_state           = 0;
     feedback.system_status_valid = false;
+    return true;
+}
+
+bool MotorClient::read_system_params(MotorSystemParams& params, int timeout_ms,
+                                     bool quiet)
+{
+    const std::vector<uint8_t> request =
+        build_motor_frame(kCmdReadSystemParams, {}, cfg_.sequence, cfg_.address);
+    if (!send_raw(request))
+        return false;
+
+    MotorFrame frame;
+    if (!read_frame(kCmdReadSystemParams, frame, timeout_ms, quiet))
+        return false;
+    if (!validate_payload_len(frame, kSystemParamsPayloadLen, quiet,
+                              "system params")) {
+        return false;
+    }
+
+    parse_system_params(frame, params);
+    return true;
+}
+
+bool MotorClient::write_system_params(const MotorSystemParams& params,
+                                      bool save_to_flash, int timeout_ms,
+                                      bool quiet,
+                                      MotorSystemParams* echoed_params)
+{
+    const uint8_t command =
+        save_to_flash ? kCmdSaveSystemParams : kCmdWriteSystemParams;
+    if (!send_frame(command, build_system_params_payload(params)))
+        return false;
+
+    MotorFrame frame;
+    if (!read_frame(command, frame, timeout_ms, quiet))
+        return false;
+    if (!validate_payload_len(frame, kSystemParamsPayloadLen, quiet,
+                              save_to_flash ? "saved system params" :
+                                               "written system params")) {
+        return false;
+    }
+
+    if (echoed_params)
+        parse_system_params(frame, *echoed_params);
     return true;
 }
 
