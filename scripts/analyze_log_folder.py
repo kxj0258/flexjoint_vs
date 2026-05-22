@@ -10,17 +10,32 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from analyze_run import (
-    FileDialogError,
-    analyze_run,
-    clean_for_json,
-    compute_metrics,
-    default_run_root,
-    format_metric,
-    load_run,
-    resolve_path,
-    select_directory_dialog,
-)
+import yaml
+
+try:
+    from analyze_run import (
+        FileDialogError,
+        analyze_run,
+        clean_for_json,
+        compute_metrics,
+        default_run_root,
+        format_metric,
+        load_run,
+        resolve_path,
+        select_directory_dialog,
+    )
+except ModuleNotFoundError:  # pragma: no cover - supports package-style imports
+    from scripts.analyze_run import (
+        FileDialogError,
+        analyze_run,
+        clean_for_json,
+        compute_metrics,
+        default_run_root,
+        format_metric,
+        load_run,
+        resolve_path,
+        select_directory_dialog,
+    )
 
 
 SUMMARY_FIELDS = [
@@ -29,6 +44,10 @@ SUMMARY_FIELDS = [
     "analysis_dir",
     "status",
     "error",
+    "controller_mode",
+    "feature_count",
+    "desired_coords",
+    "task_key",
     "exit_reason",
     "sample_count",
     "duration_s",
@@ -69,14 +88,73 @@ def metric_value(metrics: Dict[str, Any], key: str) -> Any:
     return clean_for_json(value)
 
 
+def nested_get(mapping: Dict[str, Any], keys: Sequence[str],
+               default: Any = None) -> Any:
+    current: Any = mapping
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return default
+        current = current[key]
+    return current
+
+
+def normalize_desired_coords(value: Any) -> List[float]:
+    if not isinstance(value, list):
+        return []
+    return [float(item) for item in value]
+
+
+def format_desired_coords(coords: Sequence[float]) -> str:
+    return "[" + ", ".join(f"{coord:.6g}" for coord in coords) + "]"
+
+
+def make_task_key(feature_count: Any, desired_coords: Sequence[float]) -> str:
+    return f"N={feature_count}; yd={format_desired_coords(desired_coords)}"
+
+
+def load_run_metadata(run_dir: Path) -> Dict[str, Any]:
+    config_file = run_dir / "run_config.yaml"
+    metadata: Dict[str, Any] = {
+        "controller_mode": "",
+        "feature_count": "",
+        "desired_coords": [],
+        "task_key": "",
+    }
+    try:
+        with config_file.open("r", encoding="utf-8") as handle:
+            config = yaml.safe_load(handle) or {}
+    except Exception as exc:
+        metadata["config_error"] = str(exc)
+        return metadata
+
+    controller_mode = nested_get(config, ["experiment", "controller_mode"], "")
+    desired_coords = normalize_desired_coords(
+        nested_get(config, ["vision", "desired_coords"], [])
+    )
+    feature_count = nested_get(config, ["vision", "feature_count"], None)
+    if feature_count is None and desired_coords:
+        feature_count = len(desired_coords) // 2
+
+    metadata["controller_mode"] = str(controller_mode or "")
+    metadata["feature_count"] = feature_count if feature_count is not None else ""
+    metadata["desired_coords"] = desired_coords
+    metadata["task_key"] = make_task_key(metadata["feature_count"], desired_coords)
+    return metadata
+
+
 def result_row(result: Dict[str, Any]) -> Dict[str, Any]:
     metrics = result.get("metrics") or {}
+    metadata = result.get("metadata") or {}
     row: Dict[str, Any] = {
         "run_name": result["run_dir"].name,
         "run_dir": str(result["run_dir"]),
         "analysis_dir": str(result.get("analysis_dir") or ""),
         "status": result["status"],
         "error": result.get("error", ""),
+        "controller_mode": metadata.get("controller_mode", ""),
+        "feature_count": metadata.get("feature_count", ""),
+        "desired_coords": format_desired_coords(metadata.get("desired_coords") or []),
+        "task_key": metadata.get("task_key", ""),
     }
     for field in SUMMARY_FIELDS:
         if field in row:
@@ -107,6 +185,7 @@ def write_json(results: Sequence[Dict[str, Any]], log_root: Path,
                 "analysis_dir": str(result.get("analysis_dir") or ""),
                 "status": result["status"],
                 "error": result.get("error", ""),
+                "metadata": result.get("metadata"),
                 "metrics": result.get("metrics"),
             }
             for result in results
@@ -132,16 +211,42 @@ def write_markdown(results: Sequence[Dict[str, Any]], log_root: Path,
         f"- Successful: {ok_count}",
         f"- Failed: {failed_count}",
         "",
+        "## By Task And Controller",
+        "",
+    ]
+
+    grouped: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    for result in results:
+        metadata = result.get("metadata") or {}
+        key = metadata.get("task_key") or "unknown task"
+        mode = metadata.get("controller_mode") or "unknown_controller"
+        grouped.setdefault(key, {}).setdefault(mode, []).append(result)
+
+    for key in sorted(grouped):
+        lines.extend([f"### {key}", ""])
+        lines.append("| Controller | Runs | Run directories |")
+        lines.append("|---|---:|---|")
+        for mode in sorted(grouped[key]):
+            runs_for_mode = grouped[key][mode]
+            names = ", ".join(result["run_dir"].name for result in runs_for_mode)
+            lines.append(f"| {mode} | {len(runs_for_mode)} | {names} |")
+        lines.append("")
+
+    lines.extend([
         "## Runs",
         "",
-        "| Run | Status | Exit | Duration (s) | Initial RMS (px) | Final RMS (px) | Convergence (s) | Vision valid | Feedback valid |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|",
-    ]
+        "| Run | Controller | Feature Count | Desired Coords | Status | Exit | Duration (s) | Initial RMS (px) | Final RMS (px) | Convergence (s) | Vision valid | Feedback valid |",
+        "|---|---|---:|---|---|---|---:|---:|---:|---:|---:|---:|",
+    ])
     for result in results:
         metrics = result.get("metrics") or {}
+        metadata = result.get("metadata") or {}
         lines.append(
-            "| {run} | {status} | {exit_reason} | {duration} | {initial} | {final} | {conv} | {vision} | {feedback} |".format(
+            "| {run} | {controller} | {feature_count} | `{desired}` | {status} | {exit_reason} | {duration} | {initial} | {final} | {conv} | {vision} | {feedback} |".format(
                 run=result["run_dir"].name,
+                controller=metadata.get("controller_mode", ""),
+                feature_count=metadata.get("feature_count", ""),
+                desired=format_desired_coords(metadata.get("desired_coords") or []),
                 status=result["status"],
                 exit_reason=metrics.get("exit_reason", result.get("error", "")),
                 duration=format_metric(metrics.get("duration_s")),
@@ -168,6 +273,7 @@ def write_markdown(results: Sequence[Dict[str, Any]], log_root: Path,
 def analyze_one_run(run_dir: Path, paper_style: bool, skip_existing: bool,
                     stop_on_error: bool) -> Dict[str, Any]:
     analysis_dir = run_dir / "analysis"
+    metadata = load_run_metadata(run_dir)
     try:
         if not skip_existing or not (analysis_dir / "metrics.json").exists():
             analysis_dir = analyze_run(run_dir, analysis_dir, paper_style)
@@ -178,6 +284,7 @@ def analyze_one_run(run_dir: Path, paper_style: bool, skip_existing: bool,
             "run_dir": run_dir,
             "analysis_dir": analysis_dir,
             "status": "ok",
+            "metadata": metadata,
             "metrics": metrics,
         }
     except Exception as exc:
@@ -188,6 +295,7 @@ def analyze_one_run(run_dir: Path, paper_style: bool, skip_existing: bool,
             "analysis_dir": analysis_dir,
             "status": "failed",
             "error": str(exc),
+            "metadata": metadata,
             "metrics": None,
         }
 
@@ -304,4 +412,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
