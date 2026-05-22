@@ -1,9 +1,32 @@
 #include "feature_detection.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 #include <opencv2/imgproc.hpp>
+
+namespace {
+
+bool valid_feature_count(int feature_count)
+{
+    return feature_count == kLegacyFeaturePoints ||
+           feature_count == kMaxFeaturePoints;
+}
+
+bool circle_center_less(const FeatureCircle& a, const FeatureCircle& b)
+{
+    if (a.center.x != b.center.x)
+        return a.center.x < b.center.x;
+    return a.center.y < b.center.y;
+}
+
+bool radius_asc_then_center(const FeatureCircle& a, const FeatureCircle& b)
+{
+    if (a.radius != b.radius)
+        return a.radius < b.radius;
+    return circle_center_less(a, b);
+}
+
+} // namespace
 
 std::vector<FeatureCircle> detect_feature_circles(const cv::Mat& bgr,
                                                   const CircleDetectionConfig& cfg,
@@ -66,6 +89,34 @@ bool select_three_feature_circles(const std::vector<FeatureCircle>& circles,
     return true;
 }
 
+bool select_feature_circles(const std::vector<FeatureCircle>& circles,
+                            int feature_count,
+                            std::array<FeatureCircle, kMaxFeaturePoints>& selected)
+{
+    if (!valid_feature_count(feature_count) ||
+        circles.size() < static_cast<size_t>(feature_count)) {
+        return false;
+    }
+
+    if (feature_count == kLegacyFeaturePoints) {
+        std::array<FeatureCircle, kLegacyFeaturePoints> legacy;
+        if (!select_three_feature_circles(circles, legacy))
+            return false;
+        for (int i = 0; i < kLegacyFeaturePoints; ++i)
+            selected[i] = legacy[i];
+        return true;
+    }
+
+    std::vector<FeatureCircle> sorted = circles;
+    std::sort(sorted.begin(), sorted.end(), radius_asc_then_center);
+
+    selected[0] = sorted[1];                 // second-smallest radius
+    selected[1] = sorted[sorted.size() - 2]; // second-largest radius
+    selected[2] = sorted.front();            // smallest radius
+    selected[3] = sorted.back();             // largest radius
+    return true;
+}
+
 void feature_circles_to_arrays(const std::array<FeatureCircle, 3>& selected,
                                float img_pos[6], int rad_out[3])
 {
@@ -76,15 +127,53 @@ void feature_circles_to_arrays(const std::array<FeatureCircle, 3>& selected,
     }
 }
 
+bool feature_circles_to_arrays(
+    const std::array<FeatureCircle, kMaxFeaturePoints>& selected,
+    int feature_count,
+    float* img_pos,
+    int img_capacity_points,
+    int* rad_out,
+    int rad_capacity_points)
+{
+    if (!valid_feature_count(feature_count) || !img_pos || !rad_out ||
+        img_capacity_points < feature_count ||
+        rad_capacity_points < feature_count) {
+        return false;
+    }
+
+    for (int i = 0; i < feature_count; ++i) {
+        img_pos[2 * i]     = selected[i].center.x;
+        img_pos[2 * i + 1] = selected[i].center.y;
+        rad_out[i]         = cvRound(selected[i].radius);
+    }
+    return true;
+}
+
 void draw_feature_overlay(cv::Mat& image,
                           const std::vector<FeatureCircle>& circles,
                           const std::array<FeatureCircle, 3>* selected,
                           const float desired[6])
 {
+    std::array<FeatureCircle, kMaxFeaturePoints> selected_max;
+    if (selected) {
+        for (int i = 0; i < kLegacyFeaturePoints; ++i)
+            selected_max[i] = (*selected)[i];
+    }
+    draw_feature_overlay(image, circles, selected ? &selected_max : nullptr,
+                         kLegacyFeaturePoints, desired);
+}
+
+void draw_feature_overlay(
+    cv::Mat& image,
+    const std::vector<FeatureCircle>& circles,
+    const std::array<FeatureCircle, kMaxFeaturePoints>* selected,
+    int feature_count,
+    const float* desired)
+{
     (void)circles;
 
     if (selected) {
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < feature_count; ++i) {
             const auto& c = (*selected)[i];
             cv::Point center(cvRound(c.center.x), cvRound(c.center.y));
             cv::circle(image, center, cvRound(c.radius), cv::Scalar(255, 0, 0), 2);
@@ -92,11 +181,18 @@ void draw_feature_overlay(cv::Mat& image,
     }
 
     if (desired) {
-        static const int desired_radius[3] = {21, 24, 17};
-        for (int i = 0; i < 3; ++i) {
+        static const int legacy_desired_radius[kLegacyFeaturePoints] = {
+            21, 24, 17
+        };
+        for (int i = 0; i < feature_count; ++i) {
+            int desired_radius = 18;
+            if (feature_count == kLegacyFeaturePoints)
+                desired_radius = legacy_desired_radius[i];
+            else if (selected)
+                desired_radius = std::max(3, cvRound((*selected)[i].radius));
             cv::circle(image,
                        cv::Point(cvRound(desired[2 * i]), cvRound(desired[2 * i + 1])),
-                       desired_radius[i], cv::Scalar(0, 0, 255), 2);
+                       desired_radius, cv::Scalar(0, 0, 255), 2);
         }
     }
 }

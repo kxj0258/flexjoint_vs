@@ -204,7 +204,17 @@ task:
 
 ```bash
 python3 scripts/analyze_run.py --run data/log/<timestamp>
+python3 scripts/analyze_log_folder.py data/log
 python3 scripts/compare_runs.py data/experiments/example_manifest.yaml
+```
+
+`analyze_log_folder.py` 会自动扫描所选 log 文件夹下每个包含 `dataFile.txt`
+和 `run_config.yaml` 的子目录，逐个生成单次分析，并在 log 根目录下输出
+`batch_analysis/batch_summary.md`、`batch_metrics.csv` 和 `batch_metrics.json`。
+不带参数运行时会弹出文件夹选择框：
+
+```bash
+python3 scripts/analyze_log_folder.py
 ```
 
 `compare_runs.py` 会比较图像误差、特征点轨迹、控制输入，并输出快状态
@@ -384,8 +394,10 @@ control:
 
 ```yaml
 vision:
+  feature_count: 3
   desired_coords: [264.5, 96.5, 298.5, 166.5, 174.5, 144.5]
-  # 三个特征点的期望图像坐标 [u1,v1, u2,v2, u3,v3]（像素）
+  # feature_count=3 时为 [u1,v1, u2,v2, u3,v3]（6 个数）
+  # feature_count=4 时为 [u1,v1, ..., u4,v4]（8 个数）
   save_path: "data/frames/"   # 主程序图像帧保存路径（相对于项目目录）
   hough_dp: 1.0               # Hough 累加器分辨率比例
   hough_min_dist: 30.0        # 圆心之间的最小距离（像素）
@@ -397,6 +409,13 @@ vision:
   blur_sigma: 2.0             # 高斯滤波 sigma
   equalize_hist: false        # 是否对灰度图做直方图均衡
 ```
+
+`feature_count` 只支持 `3` 或 `4`，不写时默认 `3`，旧配置可继续使用。
+3 点模式保持历史编号顺序：中半径、最大半径、最小半径。4 点模式按半径从
+小到大排序后输出：点1=次小半径，点2=次大半径，点3=最小半径，点4=最大
+半径。`desired_coords` 必须按这个排序顺序填写，也就是
+`[u_second_smallest,v_second_smallest,
+u_second_largest,v_second_largest, u_smallest,v_smallest, u_largest,v_largest]`。
 
 ### motor_protocol — 电机测试协议配置
 
@@ -463,11 +482,21 @@ robot:
   L: 0.3                          # 连杆长度（米）
   rt_e1: [0.06, -0.055, 0.0]      # 特征点1相对末端偏移（米）
   rt_e2: [0.075, 0.075, 0.0]      # 特征点2相对末端偏移（米）
+  feature_offsets:
+    - [0.0, 0.0, 0.0]
+    - [0.06, -0.055, 0.0]
+    - [0.075, 0.075, 0.0]
+    - [-0.045, 0.055, 0.0]
   initial_angle_rad: -0.185       # 初始关节角（弧度）
   encoder_zero_offset_deg: 134.539  # 编码器零点偏移（度）
   camera_intrinsics: [487.05, 487.05, 338.23, 231.89]  # fx, fy, cx, cy
   camera_extrinsics: [...]        # 相机外参矩阵（行主序 3×4）
 ```
+
+`feature_offsets` 的顺序必须和视觉编号、`vision.desired_coords` 顺序一致。
+旧配置没有 `feature_offsets` 时，3 点模式会自动使用 `[0,0,0]`、`rt_e1`、
+`rt_e2`。`feature_count=4` 时必须提供至少 4 个三维偏置；样例中的第 4 个
+偏置只是占位，需要按实际 4 点标定板替换。
 
 零点换算公式：
 
@@ -521,6 +550,7 @@ encoder_zero_offset_deg = single_turn_deg - q0 * 180 / pi
 - 修复了原代码中 `VideoCapture` 按值传递的 bug（OpenCV `VideoCapture` 不可廉价拷贝）
 - 使用现代 OpenCV 常量（`cv::COLOR_BGR2GRAY`、`cv::HOUGH_GRADIENT` 等，替代已废弃的 `CV_` 前缀常量）
 - 每帧检测到的圆按半径排序，输出中圆、最大圆、最小圆的坐标和半径
+- 支持 `vision.feature_count=3/4`；控制器会按检测排序使用对应 `desired_coords` 和 `robot.feature_offsets`
 - 自动保存带标注的图像帧到 `data/frames/`
 
 ### `motor_client` — 电机命令与反馈
@@ -554,7 +584,7 @@ encoder_zero_offset_deg = single_turn_deg - q0 * 180 / pi
 |--------|------|
 | `state_joint_angle_rad` | 控制状态中的关节角（rad） |
 | `state_joint_velocity_rad_s` | 控制状态中的关节角速度（rad/s） |
-| `state_img_u1`–`state_img_v3` | 三个特征点图像坐标（像素） |
+| `state_img_u1`–`state_img_v3` | 兼容旧布局的前三个特征点图像坐标（像素） |
 | `state_theta_0`–`state_theta_3` | 自适应相机参数 theta[4] |
 | `state_rho_0`–`state_rho_4` | 鲁棒项参数 rho[5] |
 | `state_obs_0`–`state_obs_3` | 观测器状态 obs[4] |
@@ -591,6 +621,6 @@ sudo usermod -aG dialout $USER
 # 重新登录后再运行
 ```
 
-**Q: 检测不到 3 个圆**
+**Q: 检测不到足够的特征圆**
 
 调整 `config/robot_config.yaml` 中的 `hough_param2`（减小该值可检测到更多圆），或调整 `hough_min_radius` / `hough_max_radius` 匹配实际标记尺寸。

@@ -25,7 +25,6 @@ import pandas as pd
 import yaml
 
 
-IMAGE_COLUMNS = ["img_u1", "img_v1", "img_u2", "img_v2", "img_u3", "img_v3"]
 THETA_COLUMNS = [f"state_theta_{i}" for i in range(4)]
 RHO_COLUMNS = [f"state_rho_{i}" for i in range(5)]
 OBS_COLUMNS = [f"state_obs_{i}" for i in range(4)]
@@ -44,7 +43,6 @@ REQUIRED_COLUMNS = [
     "joint_velocity_rad_s",
     "feedback_ok",
     "vision_ok",
-    *IMAGE_COLUMNS,
     *THETA_COLUMNS,
     *RHO_COLUMNS,
     *OBS_COLUMNS,
@@ -65,6 +63,8 @@ class RunData:
     df: pd.DataFrame
     config: Dict[str, Any]
     desired: np.ndarray
+    feature_count: int
+    image_columns: List[str]
     image_tolerance_px: float
     exit_reason: str
     t: np.ndarray
@@ -203,19 +203,46 @@ def load_yaml(path: Path) -> Dict[str, Any]:
     return loaded
 
 
-def desired_from_config(config: Dict[str, Any], config_file: Path) -> np.ndarray:
+def feature_count_from_config(config: Dict[str, Any], desired: Sequence[Any],
+                              config_file: Path) -> int:
+    configured = nested_get(config, ["vision", "feature_count"])
+    if configured is not None:
+        count = int(configured)
+        if count not in (3, 4):
+            raise ValueError(
+                f"{config_file} vision.feature_count must be 3 or 4, got {count}."
+            )
+    else:
+        count = len(desired) // 2
+    if count not in (3, 4):
+        raise ValueError(
+            f"{config_file} desired_coords imply {count} feature points; "
+            "only 3 or 4 are supported."
+        )
+    if len(desired) != 2 * count:
+        raise ValueError(
+            f"{config_file} vision.desired_coords must contain {2 * count} "
+            f"numbers for feature_count={count}, got {len(desired)}."
+        )
+    return count
+
+
+def image_columns_for_count(feature_count: int) -> List[str]:
+    columns: List[str] = []
+    for point_idx in range(feature_count):
+        columns.extend([f"img_u{point_idx + 1}", f"img_v{point_idx + 1}"])
+    return columns
+
+
+def desired_from_config(config: Dict[str, Any], config_file: Path) -> tuple[np.ndarray, int]:
     desired = nested_get(config, ["vision", "desired_coords"])
     if desired is None:
         raise ValueError(
             f"{config_file} does not contain vision.desired_coords; "
             "cannot compute image errors."
         )
-    if len(desired) != 6:
-        raise ValueError(
-            f"{config_file} vision.desired_coords must contain 6 numbers, "
-            f"got {len(desired)}."
-        )
-    return np.asarray(desired, dtype=float)
+    feature_count = feature_count_from_config(config, desired, config_file)
+    return np.asarray(desired, dtype=float), feature_count
 
 
 def tolerance_from_config(config: Dict[str, Any]) -> float:
@@ -242,13 +269,15 @@ def load_run(run_dir: str | Path) -> RunData:
         raise FileNotFoundError(f"Data log not found: {data_file}")
 
     df = pd.read_csv(data_file)
-    require_columns(df, REQUIRED_COLUMNS, data_file)
-    for column in REQUIRED_COLUMNS:
+    config = load_yaml(config_file)
+    desired, feature_count = desired_from_config(config, config_file)
+    image_columns = image_columns_for_count(feature_count)
+
+    require_columns(df, [*REQUIRED_COLUMNS, *image_columns], data_file)
+    for column in [*REQUIRED_COLUMNS, *image_columns]:
         if column != "safety_stop_reason":
             numeric_column(df, column, data_file)
 
-    config = load_yaml(config_file)
-    desired = desired_from_config(config, config_file)
     image_tolerance_px = tolerance_from_config(config)
 
     elapsed = df["elapsed_time_s"].to_numpy(dtype=float)
@@ -256,13 +285,14 @@ def load_run(run_dir: str | Path) -> RunData:
         raise ValueError(f"{data_file} contains no samples")
     t = elapsed - elapsed[0]
 
-    image_points = df[IMAGE_COLUMNS].to_numpy(dtype=float)
-    image_errors = image_points - desired.reshape(1, 6)
+    image_points = df[image_columns].to_numpy(dtype=float)
+    image_errors = image_points - desired.reshape(1, 2 * feature_count)
     point_error_norms = np.sqrt(
         image_errors[:, 0::2] ** 2 + image_errors[:, 1::2] ** 2
     )
-    # Match main.cpp image_rms_error: sqrt(sum(point_norm^2) / 3).
-    rms_image_error = np.sqrt(np.sum(point_error_norms**2, axis=1) / 3.0)
+    rms_image_error = np.sqrt(
+        np.sum(point_error_norms**2, axis=1) / float(feature_count)
+    )
 
     return RunData(
         run_dir=run_dir,
@@ -272,6 +302,8 @@ def load_run(run_dir: str | Path) -> RunData:
         df=df,
         config=config,
         desired=desired,
+        feature_count=feature_count,
+        image_columns=image_columns,
         image_tolerance_px=image_tolerance_px,
         exit_reason=parse_exit_reason(summary_file),
         t=t,
@@ -444,20 +476,19 @@ def masked(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
 def plot_image_errors(run: RunData, out_dir: Path) -> List[Path]:
     fig, ax = plt.subplots(figsize=(7.0, 3.8))
     labels = [
-        r"$\Delta u_1$",
-        r"$\Delta v_1$",
-        r"$\Delta u_2$",
-        r"$\Delta v_2$",
-        r"$\Delta u_3$",
-        r"$\Delta v_3$",
+        label
+        for point_idx in range(run.feature_count)
+        for label in (rf"$\Delta u_{point_idx + 1}$",
+                      rf"$\Delta v_{point_idx + 1}$")
     ]
-    line_styles = ["-", "--", "-.", ":", "-", "--"]
-    colors = ["tab:red", "tab:red", "tab:blue", "tab:blue", "0.15", "0.15"]
+    line_styles = ["-", "--", "-.", ":"]
+    colors = ["tab:red", "tab:red", "tab:blue", "tab:blue",
+              "0.15", "0.15", "tab:green", "tab:green"]
     for i, label in enumerate(labels):
         ax.plot(
             run.t,
             masked(run.image_errors[:, i], run.vision_mask),
-            linestyle=line_styles[i],
+            linestyle=line_styles[i % len(line_styles)],
             color=colors[i],
             label=label,
         )
@@ -472,17 +503,15 @@ def plot_image_errors(run: RunData, out_dir: Path) -> List[Path]:
 def plot_image_trajectories(run: RunData, out_dir: Path) -> List[Path]:
     fig, ax = plt.subplots(figsize=(5.6, 4.2))
     point_styles = [
-        ("red", "-", "o", r"$y_1$", r"$y_{1d}$"),
-        ("blue", "--", "s", r"$y_2$", r"$y_{2d}$"),
-        ("black", ":", "D", r"$y_3$", r"$y_{3d}$"),
+        ("red", "-", "o"),
+        ("blue", "--", "s"),
+        ("black", ":", "D"),
+        ("green", "-.", "^"),
     ]
-    for point_idx, (
-        color,
-        linestyle,
-        marker,
-        traj_label,
-        target_label,
-    ) in enumerate(point_styles):
+    for point_idx in range(run.feature_count):
+        color, linestyle, marker = point_styles[point_idx % len(point_styles)]
+        traj_label = rf"$y_{point_idx + 1}$"
+        target_label = rf"$y_{{{point_idx + 1}d}}$"
         u = masked(
             run.df[f"img_u{point_idx + 1}"].to_numpy(dtype=float),
             run.vision_mask,

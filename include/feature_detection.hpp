@@ -5,6 +5,8 @@
 
 #include <opencv2/core.hpp>
 
+#include "feature_points.hpp"
+
 struct CircleDetectionConfig {
     double hough_dp       = 1.0;
     double hough_min_dist = 30.0;
@@ -31,10 +33,29 @@ std::vector<FeatureCircle> detect_feature_circles(const cv::Mat& bgr,
 bool select_three_feature_circles(const std::vector<FeatureCircle>& circles,
                                   std::array<FeatureCircle, 3>& selected);
 
+bool select_feature_circles(const std::vector<FeatureCircle>& circles,
+                            int feature_count,
+                            std::array<FeatureCircle, kMaxFeaturePoints>& selected);
+
 void feature_circles_to_arrays(const std::array<FeatureCircle, 3>& selected,
                                float img_pos[6], int rad_out[3]);
+
+bool feature_circles_to_arrays(
+    const std::array<FeatureCircle, kMaxFeaturePoints>& selected,
+    int feature_count,
+    float* img_pos,
+    int img_capacity_points,
+    int* rad_out,
+    int rad_capacity_points);
 
 void draw_feature_overlay(cv::Mat& image,
                           const std::vector<FeatureCircle>& circles,
                           const std::array<FeatureCircle, 3>* selected,
                           const float desired[6]);
+
+void draw_feature_overlay(
+    cv::Mat& image,
+    const std::vector<FeatureCircle>& circles,
+    const std::array<FeatureCircle, kMaxFeaturePoints>* selected,
+    int feature_count,
+    const float* desired);

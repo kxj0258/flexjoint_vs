@@ -125,6 +125,21 @@ void print_settings(const CircleDetectionConfig& cfg)
            cfg.equalize_hist ? 1 : 0);
 }
 
+std::string format_selected_features(const float* img_pos, const int* radius,
+                                     int feature_count)
+{
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(1);
+    for (int i = 0; i < feature_count; ++i) {
+        if (i > 0)
+            oss << ' ';
+        oss << "p" << (i + 1) << "=("
+            << img_pos[2 * i] << "," << img_pos[2 * i + 1]
+            << ",r=" << radius[i] << ")";
+    }
+    return oss.str();
+}
+
 int slider_to_control_value(const CameraControl& ctrl)
 {
     return ctrl.min_value + ctrl.slider * ctrl.step;
@@ -473,6 +488,7 @@ void stop_recording(Recorder& recorder)
 }
 
 bool write_tuned_settings(const std::string& path, const CircleDetectionConfig& cfg,
+                          int feature_count,
                           const V4L2ControlPanel& controls)
 {
     if (!create_parent_directory(path))
@@ -483,6 +499,7 @@ bool write_tuned_settings(const std::string& path, const CircleDetectionConfig& 
         return false;
 
     out << "vision:\n";
+    out << "  feature_count: " << feature_count << "\n";
     out << "  hough_dp: " << cfg.hough_dp << "\n";
     out << "  hough_min_dist: " << cfg.hough_min_dist << "\n";
     out << "  hough_param1: " << cfg.hough_param1 << "\n";
@@ -601,9 +618,12 @@ int main(int argc, char* argv[])
         cv::Mat gray_debug;
         std::vector<FeatureCircle> circles = detect_feature_circles(
             frame, cfg, show_gray_debug ? &gray_debug : nullptr);
-        std::array<FeatureCircle, 3> selected;
-        const bool has_three = select_three_feature_circles(circles, selected);
-        draw_feature_overlay(display, circles, has_three ? &selected : nullptr,
+        std::array<FeatureCircle, kMaxFeaturePoints> selected;
+        const bool has_features =
+            select_feature_circles(circles, app.vision.feature_count, selected);
+        draw_feature_overlay(display, circles,
+                             has_features ? &selected : nullptr,
+                             app.vision.feature_count,
                              app.vision.desired);
 
         if (show_gray_debug && !gray_debug.empty()) {
@@ -615,8 +635,9 @@ int main(int argc, char* argv[])
         }
 
         char status[160];
-        std::snprintf(status, sizeof(status), "circles=%zu selected=%s p:%d/%d r:%d-%d",
-                      circles.size(), has_three ? "yes" : "no",
+        std::snprintf(status, sizeof(status), "circles=%zu selected=%s N=%d p:%d/%d r:%d-%d",
+                      circles.size(), has_features ? "yes" : "no",
+                      app.vision.feature_count,
                       cfg.hough_param1, cfg.hough_param2,
                       cfg.hough_min_rad, cfg.hough_max_rad);
         cv::putText(display, status, cv::Point(12, 28), cv::FONT_HERSHEY_SIMPLEX,
@@ -636,17 +657,18 @@ int main(int argc, char* argv[])
             }
         }
 
-        if (has_three && opts.print_every > 0 &&
+        if (has_features && opts.print_every > 0 &&
             frame_index % opts.print_every == 0) {
-            float img_pos[6] = {};
-            int radius[3] = {};
-            feature_circles_to_arrays(selected, img_pos, radius);
-            printf("frame=%d circles=%zu "
-                   "mid=(%.1f,%.1f,r=%d) max=(%.1f,%.1f,r=%d) min=(%.1f,%.1f,r=%d)\n",
-                   frame_index, circles.size(),
-                   img_pos[0], img_pos[1], radius[0],
-                   img_pos[2], img_pos[3], radius[1],
-                   img_pos[4], img_pos[5], radius[2]);
+            float img_pos[kMaxImageCoords] = {};
+            int radius[kMaxFeaturePoints] = {};
+            feature_circles_to_arrays(selected, app.vision.feature_count,
+                                      img_pos, kMaxFeaturePoints,
+                                      radius, kMaxFeaturePoints);
+            const std::string features =
+                format_selected_features(img_pos, radius,
+                                         app.vision.feature_count);
+            printf("frame=%d circles=%zu %s\n",
+                   frame_index, circles.size(), features.c_str());
         }
 
         cv::imshow(window, display);
@@ -677,7 +699,8 @@ int main(int argc, char* argv[])
         if (key == 'c' && has_camera_controls)
             camera_controls.print_controls();
         if (key == 'w') {
-            if (write_tuned_settings(tuned_output, cfg, camera_controls))
+            if (write_tuned_settings(tuned_output, cfg, app.vision.feature_count,
+                                     camera_controls))
                 printf("Wrote tuned settings to %s\n", tuned_output.c_str());
             else
                 fprintf(stderr, "Failed to write %s\n", tuned_output.c_str());

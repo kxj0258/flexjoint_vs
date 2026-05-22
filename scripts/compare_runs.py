@@ -88,36 +88,40 @@ def plot_compare_image_error(runs: Sequence[Dict[str, Any]], out_dir: Path) -> L
 
 
 def plot_compare_trajectories(runs: Sequence[Dict[str, Any]], out_dir: Path) -> List[Path]:
-    fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.8))
+    fig, ax = plt.subplots(figsize=(6.2, 4.6))
     colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
-    for point_idx, ax in enumerate(axes):
-        for run_idx, item in enumerate(runs):
-            run = item["run_data"]
-            color = colors[run_idx % len(colors)] if colors else None
-            u = run.df[f"img_u{point_idx + 1}"].to_numpy(dtype=float)
-            v = run.df[f"img_v{point_idx + 1}"].to_numpy(dtype=float)
-            u = u.copy()
-            v = v.copy()
+    line_styles = ["-", "--", ":", "-."]
+    markers = ["o", "s", "D", "^"]
+    for run_idx, item in enumerate(runs):
+        run = item["run_data"]
+        color = colors[run_idx % len(colors)] if colors else None
+        for point_idx in range(run.feature_count):
+            u = run.df[f"img_u{point_idx + 1}"].to_numpy(dtype=float).copy()
+            v = run.df[f"img_v{point_idx + 1}"].to_numpy(dtype=float).copy()
             u[~run.vision_mask] = np.nan
             v[~run.vision_mask] = np.nan
-            ax.plot(u, v, label=item["label"], color=color)
-        ax.scatter(
-            run.desired[2 * point_idx],
-            run.desired[2 * point_idx + 1],
-            color="0.1",
-            marker="x",
-            s=48,
-            linewidths=1.5,
-            label="target" if point_idx == 0 else None,
-        )
-        ax.set_title(f"Feature {point_idx + 1}")
-        ax.set_xlabel("u (pixel)")
-        if point_idx == 0:
-            ax.set_ylabel("v (pixel)")
-        ax.set_aspect("equal", adjustable="datalim")
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=max(1, len(labels)))
-    fig.tight_layout(rect=(0, 0, 1, 0.90))
+            ax.plot(
+                u,
+                v,
+                label=f"{item['label']} y{point_idx + 1}",
+                color=color,
+                linestyle=line_styles[point_idx % len(line_styles)],
+            )
+            ax.scatter(
+                run.desired[2 * point_idx],
+                run.desired[2 * point_idx + 1],
+                color=color or "0.1",
+                marker=markers[point_idx % len(markers)],
+                s=48,
+                linewidths=1.5,
+                facecolors="none",
+                label=f"{item['label']} y{point_idx + 1} target",
+            )
+    ax.set_xlabel("u (pixel)")
+    ax.set_ylabel("v (pixel)")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.legend(loc="best", fontsize=7)
+    fig.tight_layout()
     return save_figure(fig, out_dir, "fig_compare_trajectories")
 
 

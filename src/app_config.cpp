@@ -144,6 +144,15 @@ bool scalar_to_bool(const YAML::Node& node, bool fallback)
     return node.as<bool>();
 }
 
+int validate_feature_count(int feature_count)
+{
+    if (feature_count != kLegacyFeaturePoints &&
+        feature_count != kMaxFeaturePoints) {
+        throw std::runtime_error("vision.feature_count must be 3 or 4");
+    }
+    return feature_count;
+}
+
 std::string scalar_to_string(const YAML::Node& node, const std::string& fallback)
 {
     if (!node)
@@ -172,6 +181,12 @@ AppConfig load_app_config(const std::string& path)
     c.initial_angle_rad       = y["robot"]["initial_angle_rad"].as<float>();
     c.encoder_zero_offset_deg = y["robot"]["encoder_zero_offset_deg"].as<float>();
 
+    const auto vis = y["vision"];
+    const int feature_count = validate_feature_count(
+        scalar_to_int(vis["feature_count"], kLegacyFeaturePoints));
+    c.vision.feature_count = feature_count;
+    c.ctrl.feature_count = feature_count;
+
     auto intr = y["robot"]["camera_intrinsics"].as<std::vector<float>>();
     c.ctrl.fx = intr[0];
     c.ctrl.fy = intr[1];
@@ -188,6 +203,44 @@ AppConfig load_app_config(const std::string& path)
     for (int i = 0; i < 3; i++) {
         c.ctrl.rt_e1[i] = e1[i];
         c.ctrl.rt_e2[i] = e2[i];
+    }
+    for (int i = 0; i < 3; ++i) {
+        c.ctrl.feature_offsets[0][i] = 0.0f;
+        c.ctrl.feature_offsets[1][i] = c.ctrl.rt_e1[i];
+        c.ctrl.feature_offsets[2][i] = c.ctrl.rt_e2[i];
+        c.ctrl.feature_offsets[3][i] = 0.0f;
+    }
+    if (const auto offsets = y["robot"]["feature_offsets"]) {
+        if (!offsets.IsSequence()) {
+            throw std::runtime_error("robot.feature_offsets must be a sequence");
+        }
+        if (offsets.size() < static_cast<size_t>(feature_count)) {
+            std::ostringstream oss;
+            oss << "robot.feature_offsets must contain at least "
+                << feature_count << " three-number offsets for feature_count="
+                << feature_count;
+            throw std::runtime_error(oss.str());
+        }
+        const int offsets_to_copy = static_cast<int>(
+            std::min<size_t>(offsets.size(), kMaxFeaturePoints));
+        for (int point = 0; point < offsets_to_copy; ++point) {
+            auto offset = offsets[point].as<std::vector<float>>();
+            if (offset.size() != 3) {
+                std::ostringstream oss;
+                oss << "robot.feature_offsets[" << point
+                    << "] must contain exactly 3 numbers";
+                throw std::runtime_error(oss.str());
+            }
+            for (int axis = 0; axis < 3; ++axis)
+                c.ctrl.feature_offsets[point][axis] = offset[axis];
+        }
+        for (int axis = 0; axis < 3; ++axis) {
+            c.ctrl.rt_e1[axis] = c.ctrl.feature_offsets[1][axis];
+            c.ctrl.rt_e2[axis] = c.ctrl.feature_offsets[2][axis];
+        }
+    } else if (feature_count == kMaxFeaturePoints) {
+        throw std::runtime_error(
+            "vision.feature_count=4 requires robot.feature_offsets with at least 4 offsets");
     }
 
     const auto ctrl = y["control"];
@@ -216,11 +269,18 @@ AppConfig load_app_config(const std::string& path)
     for (int i = 0; i < 5; i++)
         c.ctrl.mu_rho[i] = mu[i];
 
-    auto yd = y["vision"]["desired_coords"].as<std::vector<float>>();
-    for (int i = 0; i < 6; i++)
+    auto yd = vis["desired_coords"].as<std::vector<float>>();
+    const int expected_coords = 2 * feature_count;
+    if (yd.size() != static_cast<size_t>(expected_coords)) {
+        std::ostringstream oss;
+        oss << "vision.desired_coords must contain " << expected_coords
+            << " numbers when vision.feature_count=" << feature_count
+            << ", got " << yd.size();
+        throw std::runtime_error(oss.str());
+    }
+    for (int i = 0; i < expected_coords; i++)
         c.ctrl.yd[i] = yd[i];
 
-    const auto vis = y["vision"];
     c.vision.camera_index  = y["camera"]["index"].as<int>();
     c.vision.fps           = y["camera"]["fps"].as<int>();
     c.vision.width         = y["camera"]["width"].as<int>();
@@ -246,7 +306,7 @@ AppConfig load_app_config(const std::string& path)
                                                   scalar_to_int(entry.second, 0));
         }
     }
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < expected_coords; i++)
         c.vision.desired[i] = yd[i];
 
     const auto proto = y["motor_protocol"];

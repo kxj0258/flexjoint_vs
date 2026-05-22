@@ -32,6 +32,29 @@ bool FeatureExtractor::extract(float img_pos[6], int rad_out[3])
 bool FeatureExtractor::extract(float img_pos[6], int rad_out[3],
                                cv::Mat* raw_frame, cv::Mat* annotated_frame)
 {
+    return extract_features_impl(img_pos, kLegacyFeaturePoints,
+                                 rad_out, kLegacyFeaturePoints,
+                                 kLegacyFeaturePoints,
+                                 raw_frame, annotated_frame);
+}
+
+bool FeatureExtractor::extract_features(float* img_pos, int img_capacity_points,
+                                        int* rad_out, int rad_capacity_points,
+                                        cv::Mat* raw_frame,
+                                        cv::Mat* annotated_frame)
+{
+    return extract_features_impl(img_pos, img_capacity_points,
+                                 rad_out, rad_capacity_points,
+                                 cfg_.feature_count,
+                                 raw_frame, annotated_frame);
+}
+
+bool FeatureExtractor::extract_features_impl(float* img_pos, int img_capacity_points,
+                                             int* rad_out, int rad_capacity_points,
+                                             int feature_count,
+                                             cv::Mat* raw_frame,
+                                             cv::Mat* annotated_frame)
+{
     cv::Mat img;
     cap_ >> img;
     if (img.empty()) {
@@ -57,28 +80,42 @@ bool FeatureExtractor::extract(float img_pos[6], int rad_out[3],
     detect_cfg.equalize_hist  = cfg_.equalize_hist;
 
     std::vector<FeatureCircle> circles = detect_feature_circles(img, detect_cfg);
-    if (circles.size() < 3) {
+    if (circles.size() < static_cast<size_t>(feature_count)) {
         cv::namedWindow("gu_result", cv::WINDOW_AUTOSIZE);
         cv::imshow("gu_result", img);
         if (annotated_frame)
             *annotated_frame = img.clone();
         cv::waitKey(5);
-        fprintf(stderr, "FeatureExtractor: detected %zu circles, need 3\n", circles.size());
+        fprintf(stderr, "FeatureExtractor: detected %zu circles, need %d\n",
+                circles.size(), feature_count);
         return false;
     }
 
-    std::array<FeatureCircle, 3> selected;
-    if (!select_three_feature_circles(circles, selected)) {
+    std::array<FeatureCircle, kMaxFeaturePoints> selected;
+    if (!select_feature_circles(circles, feature_count, selected)) {
         cv::namedWindow("gu_result", cv::WINDOW_AUTOSIZE);
         cv::imshow("gu_result", img);
         if (annotated_frame)
             *annotated_frame = img.clone();
         cv::waitKey(5);
-        fprintf(stderr, "FeatureExtractor: cannot select 3 feature circles\n");
+        fprintf(stderr, "FeatureExtractor: cannot select %d feature circles\n",
+                feature_count);
         return false;
     }
-    feature_circles_to_arrays(selected, img_pos, rad_out);
-    draw_feature_overlay(img, circles, &selected, cfg_.desired);
+    if (!feature_circles_to_arrays(selected, feature_count, img_pos,
+                                   img_capacity_points, rad_out,
+                                   rad_capacity_points)) {
+        cv::namedWindow("gu_result", cv::WINDOW_AUTOSIZE);
+        cv::imshow("gu_result", img);
+        if (annotated_frame)
+            *annotated_frame = img.clone();
+        cv::waitKey(5);
+        fprintf(stderr,
+                "FeatureExtractor: output capacity too small for %d feature circles\n",
+                feature_count);
+        return false;
+    }
+    draw_feature_overlay(img, circles, &selected, feature_count, cfg_.desired);
 
     cv::namedWindow("gu_result", cv::WINDOW_AUTOSIZE);
     cv::imshow("gu_result", img);

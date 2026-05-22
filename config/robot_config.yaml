@@ -7,7 +7,7 @@ serial:
   baud_rate: 115200
 
 camera:
-  index: 2
+  index: 0
   fps: 60
   width: 640
   height: 480
@@ -46,15 +46,20 @@ control:
   mu_rho: [0.01, 0.0001, 0.01, 0.001, 0.001]
 
 vision:
-  desired_coords: [266.5, 120.5, 301.5, 203.5, 172.5, 162.5]
+  feature_count: 4
+  # desired_coords: [266.5, 120.5, 301.5, 203.5, 172.5, 162.5]
   # desired_coords: [223.5, 95.5, 246.5, 183.5, 122.5, 120.5]
+  # desired_coords: [242.5, 86.5, 251.5, 176.5, 139.5, 93.5, 165.5, 177.5]
+  # desired_coords: [269.5, 101.5, 288.5, 189.5, 168.5, 121.5, 203.5, 200.5]
+  # desired_coords: [237.1, 121.9, 226.9, 210.6, 134.1, 107.6, 144.3, 192.3]
+  desired_coords: [301.5, 168.5, 318.5, 255.5, 201.5, 187.5, 233.5, 263.5]
   save_path: "data/frames/"
   hough_dp: 1.02
   hough_min_dist: 30.0
   hough_param1: 150
   hough_param2: 30
   hough_min_radius: 10
-  hough_max_radius: 25
+  hough_max_radius: 32
   blur_kernel: 7
   blur_sigma: 3.3
   equalize_hist: false
@@ -112,6 +117,14 @@ robot:
   L: 0.3
   rt_e1: [0.06, -0.055, 0.0]
   rt_e2: [0.075, 0.075, 0.0]
+  rt_e3: [0.115, 0.0, 0.0]
+  # feature_offsets order must match vision point numbering:
+  # point1=[0,0,0], point2=rt_e1, point3=rt_e2, point4 placeholder.
+  feature_offsets:
+    - [0.0, 0.0, 0.0]
+    - [0.06, -0.055, 0.0]
+    - [0.075, 0.075, 0.0]
+    - [0.115, 0.0, 0.0]
   initial_angle_rad: -0.185
   encoder_zero_offset_deg: 10.621692
   # fx, fy, cx, cy
