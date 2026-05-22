@@ -26,10 +26,11 @@ struct Options {
     std::string config_path;
     std::string intrinsics_path;
     std::string output_path = "data/camera_calibration.yaml";
-    int         board_cols = 9;
-    int         board_rows = 6;
+    bool        output_path_from_cli = false;
+    int         board_cols = 8;
+    int         board_rows = 11;
     int         target_samples = 20;
-    double      square_size_m = 0.025;
+    double      square_size_m = 0.015;
     bool        extrinsic_only = false;
 };
 
@@ -59,6 +60,7 @@ bool parse_args(int argc, char* argv[], Options& opts)
             opts.target_samples = std::stoi(argv[++i]);
         } else if (arg == "--output" && i + 1 < argc) {
             opts.output_path = argv[++i];
+            opts.output_path_from_cli = true;
         } else if (arg == "--intrinsics" && i + 1 < argc) {
             opts.intrinsics_path = argv[++i];
         } else if (arg == "--extrinsic-only") {
@@ -168,6 +170,63 @@ bool solve_extrinsics(const std::vector<cv::Point3f>& object_points,
         return false;
     return cv::solvePnP(object_points, image_points, camera_matrix, dist_coeffs,
                         rvec, tvec);
+}
+
+cv::Point text_point(const cv::Point2f& p, const cv::Size& image_size)
+{
+    const int margin = 8;
+    const int x = std::max(margin, std::min(image_size.width - margin,
+                                            cvRound(p.x) + margin));
+    const int y = std::max(margin, std::min(image_size.height - margin,
+                                            cvRound(p.y) - margin));
+    return cv::Point(x, y);
+}
+
+void draw_label(cv::Mat& frame, const cv::Point& p, const char* text,
+                const cv::Scalar& color)
+{
+    cv::putText(frame, text, p, cv::FONT_HERSHEY_SIMPLEX, 0.58,
+                cv::Scalar(255, 255, 255), 3, cv::LINE_AA);
+    cv::putText(frame, text, p, cv::FONT_HERSHEY_SIMPLEX, 0.58,
+                color, 1, cv::LINE_AA);
+}
+
+void draw_board_axes(cv::Mat& frame, const cv::Mat& camera_matrix,
+                     const cv::Mat& dist_coeffs, const cv::Mat& rvec,
+                     const cv::Mat& tvec, double square_size_m)
+{
+    const float axis_len = static_cast<float>(square_size_m * 3.0);
+    std::vector<cv::Point3f> axis_points = {
+        cv::Point3f(0.0f, 0.0f, 0.0f),
+        cv::Point3f(axis_len, 0.0f, 0.0f),
+        cv::Point3f(0.0f, axis_len, 0.0f),
+        cv::Point3f(0.0f, 0.0f, axis_len),
+    };
+    std::vector<cv::Point2f> image_points;
+    cv::projectPoints(axis_points, rvec, tvec, camera_matrix, dist_coeffs,
+                      image_points);
+    if (image_points.size() != axis_points.size())
+        return;
+
+    const cv::Point2f origin = image_points[0];
+    const cv::Scalar x_color(0, 0, 255);
+    const cv::Scalar y_color(0, 200, 0);
+    const cv::Scalar z_color(255, 0, 0);
+
+    cv::circle(frame, origin, 5, cv::Scalar(255, 255, 255), -1, cv::LINE_AA);
+    cv::circle(frame, origin, 5, cv::Scalar(0, 0, 0), 1, cv::LINE_AA);
+    cv::arrowedLine(frame, origin, image_points[1], x_color, 3, cv::LINE_AA,
+                    0, 0.15);
+    cv::arrowedLine(frame, origin, image_points[2], y_color, 3, cv::LINE_AA,
+                    0, 0.15);
+    cv::arrowedLine(frame, origin, image_points[3], z_color, 3, cv::LINE_AA,
+                    0, 0.15);
+
+    const cv::Size size = frame.size();
+    draw_label(frame, text_point(origin, size), "O", cv::Scalar(20, 20, 20));
+    draw_label(frame, text_point(image_points[1], size), "+X", x_color);
+    draw_label(frame, text_point(image_points[2], size), "+Y", y_color);
+    draw_label(frame, text_point(image_points[3], size), "+Z", z_color);
 }
 
 bool create_directories(const std::string& dir)
@@ -317,6 +376,10 @@ int main(int argc, char* argv[])
     bool have_extrinsics = false;
     double rms_error = 0.0;
     bool calibrated_this_run = false;
+    const std::string project_dir = find_app_project_dir(opts.config_path);
+    const std::string output_path = opts.output_path_from_cli
+        ? opts.output_path
+        : resolve_app_path(project_dir, opts.output_path);
 
     const std::string window = "camera_calibration";
     cv::namedWindow(window, cv::WINDOW_NORMAL);
@@ -346,6 +409,16 @@ int main(int argc, char* argv[])
                                               cv::TermCriteria::COUNT, 30, 0.01));
             latest_corners = corners;
             cv::drawChessboardCorners(frame, board_size, corners, found);
+            if (have_intrinsics) {
+                cv::Mat preview_rvec;
+                cv::Mat preview_tvec;
+                if (solve_extrinsics(board_points, corners, camera_matrix,
+                                     dist_coeffs, preview_rvec, preview_tvec)) {
+                    draw_board_axes(frame, camera_matrix, dist_coeffs,
+                                    preview_rvec, preview_tvec,
+                                    opts.square_size_m);
+                }
+            }
         }
 
         char status[220];
@@ -408,12 +481,12 @@ int main(int argc, char* argv[])
                 fprintf(stderr, "Cannot solve extrinsics: need visible board and intrinsics\n");
         }
         if (key == 's') {
-            if (save_calibration(opts.output_path, opts, image_size,
+            if (save_calibration(output_path, opts, image_size,
                                  camera_matrix, dist_coeffs, rms_error,
                                  have_intrinsics, rvec, tvec, have_extrinsics))
-                printf("Saved calibration to %s\n", opts.output_path.c_str());
+                printf("Saved calibration to %s\n", output_path.c_str());
             else
-                fprintf(stderr, "Failed to save %s\n", opts.output_path.c_str());
+                fprintf(stderr, "Failed to save %s\n", output_path.c_str());
         }
     }
 

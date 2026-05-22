@@ -97,6 +97,24 @@ YAML::Node load_resolved_yaml(const std::string& path)
     return load_resolved_yaml_impl(path, include_stack);
 }
 
+fs::path find_project_dir(const fs::path& config_path)
+{
+    fs::path current = absolute_config_path(config_path).parent_path();
+    while (!current.empty()) {
+        if (fs::exists(current / "CMakeLists.txt") &&
+            fs::exists(current / "src") &&
+            fs::exists(current / "config")) {
+            return current;
+        }
+        const fs::path parent = current.parent_path();
+        if (parent == current)
+            break;
+        current = parent;
+    }
+
+    return absolute_config_path(config_path).parent_path();
+}
+
 int scalar_to_int(const YAML::Node& node, int fallback)
 {
     if (!node)
@@ -351,4 +369,18 @@ std::string load_resolved_app_config_text(const std::string& path)
     std::ostringstream text;
     text << out.c_str() << '\n';
     return text.str();
+}
+
+std::string find_app_project_dir(const std::string& config_path)
+{
+    return find_project_dir(config_path).string();
+}
+
+std::string resolve_app_path(const std::string& project_dir,
+                             const std::string& path)
+{
+    fs::path p(path);
+    if (p.is_absolute())
+        return p.string();
+    return (fs::path(project_dir) / p).string();
 }

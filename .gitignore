@@ -4,7 +4,6 @@
 /build-conda-vs/
 /out/
 /.vs/
-/scripts/
 /cmake-build-*/
 /CMakeFiles/
 /CMakeCache.txt
@@ -13,6 +12,8 @@
 /compile_commands.json
 /soft_robot_vs
 /data/log/
+*.pyc
+__pycache__/
 
 # Object/library outputs
 *.o
@@ -24,6 +25,7 @@
 *.exe
 *.out
 *.d
+*.ps
 
 # Runtime outputs
 /dataFile.txt

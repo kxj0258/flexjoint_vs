@@ -3,9 +3,9 @@ image_height: 480
 board_cols: 8
 board_rows: 11
 square_size_m: 0.015
-reprojection_error: 4.20662
-camera_intrinsics: [432.197, 433.849, 323.32, 228.158]
-camera_matrix: [432.197, 0, 323.32, 0, 433.849, 228.158, 0, 0, 1]
-distortion_coeffs: [-0.278909, 0.94523, 0.0058487, -0.0213027, -1.45281]
-camera_extrinsics: [0.995497, -0.0392155, 0.0862971, -0.0992573, 0.0413112, 0.99889, -0.0226334, -0.133107, -0.0853137, 0.0260966, 0.996012, 0.516015]
+reprojection_error: 0
+camera_intrinsics: [487.05, 487.05, 338.23, 231.89]
+camera_matrix: [487.05, 0, 338.23, 0, 487.05, 231.89, 0, 0, 1]
+distortion_coeffs: [0, 0, 0, 0, 0]
+camera_extrinsics: [-0.0279855, -0.985818, -0.165469, 0.0263361, 0.998861, -0.0211778, -0.0427638, -0.083361, 0.038653, -0.166478, 0.985287, 0.598816]
 extrinsic_frame: "board/world frame to camera frame"

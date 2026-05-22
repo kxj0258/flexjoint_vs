@@ -42,7 +42,7 @@ Run the analysis scripts after activating the environment:
 
 ```bash
 conda activate flexjoint-analysis
-python scripts/analyze_run.py --run data/log/20260520_153401 --paper-style
+python scripts/analyze_run.py --run data/log/20260520_153401
 ```
 
 To remove the environment later:
@@ -55,8 +55,13 @@ conda env remove -n flexjoint-analysis
 ## Single Run
 
 ```bash
-python3 scripts/analyze_run.py --run data/log/20260520_153401 --paper-style
+python3 scripts/analyze_run.py --run data/log/20260520_153401
 ```
+
+If `--run` is omitted, the script opens a folder picker so you can select a
+`data/log/<timestamp>` run directory interactively.
+Paper-style figures are enabled by default; pass `--no-paper-style` to use
+Matplotlib's default sans-serif styling.
 
 By default, outputs are written to `<run>/analysis`:
 
@@ -95,8 +100,13 @@ experiments:
 Then run:
 
 ```bash
-python3 scripts/compare_runs.py data/experiments/example_manifest.yaml --paper-style
+python3 scripts/compare_runs.py data/experiments/example_manifest.yaml
 ```
+
+If the manifest path is omitted, the script opens a file picker so you can
+select a `.yaml`/`.yml` manifest interactively.
+Paper-style figures are enabled by default; pass `--no-paper-style` to use
+Matplotlib's default sans-serif styling.
 
 The default output directory is `data/experiments/comparison` unless
 `output_dir` or `--out` is set.

@@ -203,8 +203,8 @@ task:
 `data/experiments/example_manifest.yaml`，再生成对比图和汇总表：
 
 ```bash
-python3 scripts/analyze_run.py --run data/log/<timestamp> --paper-style
-python3 scripts/compare_runs.py data/experiments/example_manifest.yaml --paper-style
+python3 scripts/analyze_run.py --run data/log/<timestamp>
+python3 scripts/compare_runs.py data/experiments/example_manifest.yaml
 ```
 
 `compare_runs.py` 会比较图像误差、特征点轨迹、控制输入，并输出快状态
@@ -234,9 +234,9 @@ cd build
 
 - `p`：暂停/继续
 - `g`：显示/隐藏送入 Hough 圆检测的灰度预处理图
-- `s`：保存当前带标注图像到 `data/frames/`
+- `s`：保存当前带标注图像到项目 `data/frames/`
 - `v`：开始/停止录制 MP4 视频
-- `w`：保存当前检测参数和相机控制项到 `data/vision_tuned.yaml`
+- `w`：保存当前检测参数和相机控制项到项目 `data/vision_tuned.yaml`
 - `r`：在终端打印当前参数
 - `c`：在终端打印当前相机控制项、范围和 inactive 状态
 - `q` 或 `Esc`：退出
@@ -249,9 +249,12 @@ cd build
 cd build
 ./camera_calibration ../config/robot_config.yaml \
   --cols 8 --rows 11 --square 0.015 \
-  --samples 20 \
-  --output ../data/camera_calibration.yaml
+  --samples 20
 ```
+
+不指定 `--output` 时，标定结果默认保存到项目 `data/camera_calibration.yaml`，
+即使程序是从 `build/` 目录启动也不会写到 `build/data/`。显式指定
+`--output PATH` 时按给定路径保存。
 
 快捷键：
 
@@ -383,7 +386,7 @@ control:
 vision:
   desired_coords: [264.5, 96.5, 298.5, 166.5, 174.5, 144.5]
   # 三个特征点的期望图像坐标 [u1,v1, u2,v2, u3,v3]（像素）
-  save_path: "data/frames/"   # 图像帧保存路径（相对于运行目录）
+  save_path: "data/frames/"   # 主程序图像帧保存路径（相对于项目目录）
   hough_dp: 1.0               # Hough 累加器分辨率比例
   hough_min_dist: 30.0        # 圆心之间的最小距离（像素）
   hough_param1: 100           # HoughCircles Canny 高阈值

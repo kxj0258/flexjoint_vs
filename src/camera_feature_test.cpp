@@ -40,6 +40,8 @@ struct Options {
     std::string config_path;
     std::string tuned_output = "data/vision_tuned.yaml";
     std::string video_output;
+    bool        tuned_output_from_cli = false;
+    bool        video_output_from_cli = false;
     int         print_every = 10;
     bool        show_gray_debug = false;
 };
@@ -83,8 +85,10 @@ bool parse_args(int argc, char* argv[], Options& opts)
             opts.print_every = std::stoi(argv[++i]);
         } else if (arg == "--save-settings" && i + 1 < argc) {
             opts.tuned_output = argv[++i];
+            opts.tuned_output_from_cli = true;
         } else if (arg == "--video" && i + 1 < argc) {
             opts.video_output = argv[++i];
+            opts.video_output_from_cli = true;
         } else if (arg == "--show-gray") {
             opts.show_gray_debug = true;
         } else if (arg == "-h" || arg == "--help") {
@@ -389,7 +393,7 @@ bool create_parent_directory(const std::string& path)
     return slash == std::string::npos || create_directories(path.substr(0, slash));
 }
 
-std::string make_timestamped_video_path()
+std::string make_timestamped_video_path(const std::string& project_dir)
 {
     std::time_t now = std::time(nullptr);
     std::tm tm_now = {};
@@ -400,15 +404,16 @@ std::string make_timestamped_video_path()
 #endif
 
     std::ostringstream oss;
-    oss << "data/videos/camera_feature_test_"
+    oss << resolve_app_path(project_dir, "data/videos/camera_feature_test_")
         << std::put_time(&tm_now, "%Y%m%d_%H%M%S") << ".mp4";
     return oss.str();
 }
 
-std::string normalize_video_path(const std::string& requested)
+std::string normalize_video_path(const std::string& requested,
+                                 const std::string& project_dir)
 {
     if (requested.empty())
-        return make_timestamped_video_path();
+        return make_timestamped_video_path(project_dir);
     const size_t slash = requested.find_last_of("/\\");
     const size_t dot = requested.find_last_of('.');
     if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
@@ -427,12 +432,13 @@ double get_recording_fps(const cv::VideoCapture& cap,
 }
 
 bool start_recording(Recorder& recorder, const std::string& requested_path,
-                     const cv::Size& size, double fps)
+                     const std::string& project_dir, const cv::Size& size,
+                     double fps)
 {
     if (recorder.active)
         return true;
 
-    const std::string path = normalize_video_path(requested_path);
+    const std::string path = normalize_video_path(requested_path, project_dir);
     if (!create_parent_directory(path)) {
         fprintf(stderr, "Recording: cannot create output directory for %s\n",
                 path.c_str());
@@ -507,6 +513,15 @@ int main(int argc, char* argv[])
         fprintf(stderr, "Config error: %s\n", e.what());
         return 1;
     }
+
+    const std::string project_dir = find_app_project_dir(opts.config_path);
+    const std::string tuned_output = opts.tuned_output_from_cli
+        ? opts.tuned_output
+        : resolve_app_path(project_dir, opts.tuned_output);
+    const std::string video_output = opts.video_output_from_cli
+        ? opts.video_output
+        : opts.video_output;
+    const std::string frame_dir = resolve_app_path(project_dir, "data/frames");
 
     cv::VideoCapture cap;
     if (!open_configured_camera(cap, app.vision, "camera_feature_test"))
@@ -653,7 +668,8 @@ int main(int argc, char* argv[])
                 stop_recording(recorder);
             } else {
                 const double fps = get_recording_fps(cap, app.vision);
-                start_recording(recorder, opts.video_output, display.size(), fps);
+                start_recording(recorder, video_output, project_dir,
+                                display.size(), fps);
             }
         }
         if (key == 'r')
@@ -661,14 +677,14 @@ int main(int argc, char* argv[])
         if (key == 'c' && has_camera_controls)
             camera_controls.print_controls();
         if (key == 'w') {
-            if (write_tuned_settings(opts.tuned_output, cfg, camera_controls))
-                printf("Wrote tuned settings to %s\n", opts.tuned_output.c_str());
+            if (write_tuned_settings(tuned_output, cfg, camera_controls))
+                printf("Wrote tuned settings to %s\n", tuned_output.c_str());
             else
-                fprintf(stderr, "Failed to write %s\n", opts.tuned_output.c_str());
+                fprintf(stderr, "Failed to write %s\n", tuned_output.c_str());
         }
         if (key == 's') {
-            create_directories("data/frames");
-            const std::string name = "data/frames/camera_test_" +
+            create_directories(frame_dir);
+            const std::string name = frame_dir + "/camera_test_" +
                                      std::to_string(frame_index) + ".jpg";
             cv::imwrite(name, display);
             printf("Saved %s\n", name.c_str());
