@@ -7,7 +7,7 @@ serial:
   baud_rate: 115200
 
 camera:
-  index: 0
+  index: 2
   fps: 60
   width: 640
   height: 480
@@ -49,10 +49,8 @@ vision:
   feature_count: 4
   # desired_coords: [266.5, 120.5, 301.5, 203.5, 172.5, 162.5]
   # desired_coords: [223.5, 95.5, 246.5, 183.5, 122.5, 120.5]
-  # desired_coords: [242.5, 86.5, 251.5, 176.5, 139.5, 93.5, 165.5, 177.5]
-  # desired_coords: [269.5, 101.5, 288.5, 189.5, 168.5, 121.5, 203.5, 200.5]
-  # desired_coords: [237.1, 121.9, 226.9, 210.6, 134.1, 107.6, 144.3, 192.3]
-  desired_coords: [301.5, 168.5, 318.5, 255.5, 201.5, 187.5, 233.5, 263.5]
+  desired_coords: [302.4,122.9, 331.0,206.6, 206.6,156.6, 249.4,229.0]
+  # desired_coords: [235.5, 89.5, 241.5, 179.5, 133.5, 93.5, 156.5, 177.5]
   save_path: "data/frames/"
   hough_dp: 1.02
   hough_min_dist: 30.0
