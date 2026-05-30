@@ -146,9 +146,9 @@ bool scalar_to_bool(const YAML::Node& node, bool fallback)
 
 int validate_feature_count(int feature_count)
 {
-    if (feature_count != kLegacyFeaturePoints &&
-        feature_count != kMaxFeaturePoints) {
-        throw std::runtime_error("vision.feature_count must be 3 or 4");
+    if (feature_count < kMinFeaturePoints ||
+        feature_count > kMaxFeaturePoints) {
+        throw std::runtime_error("vision.feature_count must be 2, 3, or 4");
     }
     return feature_count;
 }
@@ -238,9 +238,12 @@ AppConfig load_app_config(const std::string& path)
             c.ctrl.rt_e1[axis] = c.ctrl.feature_offsets[1][axis];
             c.ctrl.rt_e2[axis] = c.ctrl.feature_offsets[2][axis];
         }
-    } else if (feature_count == kMaxFeaturePoints) {
-        throw std::runtime_error(
-            "vision.feature_count=4 requires robot.feature_offsets with at least 4 offsets");
+    } else if (feature_count != kLegacyFeaturePoints) {
+        std::ostringstream oss;
+        oss << "vision.feature_count=" << feature_count
+            << " requires robot.feature_offsets with at least "
+            << feature_count << " offsets";
+        throw std::runtime_error(oss.str());
     }
 
     const auto ctrl = y["control"];

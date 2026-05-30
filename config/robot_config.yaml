@@ -46,7 +46,14 @@ control:
   mu_rho: [0.01, 0.0001, 0.01, 0.001, 0.001]
 
 vision:
+  # feature_count supports 2, 3, or 4. desired_coords must contain 2*N values
+  # ordered exactly like the selected circles:
+  #   N=2: point1=small radius, point2=large radius
+  #   N=3: legacy order, point1=middle radius, point2=largest, point3=smallest
+  #   N=4: point1=second-smallest, point2=second-largest,
+  #        point3=smallest, point4=largest
   feature_count: 4
+  # feature_count=2 example: desired_coords: [u1, v1, u2, v2]
   # desired_coords: [266.5, 120.5, 301.5, 203.5, 172.5, 162.5]
   # desired_coords: [223.5, 95.5, 246.5, 183.5, 122.5, 120.5]
   desired_coords: [257.5,107.5, 281.5, 194.5, 160.6,134.5, 198.5,208.5]
@@ -117,7 +124,8 @@ robot:
   rt_e2: [0.075, 0.075, 0.0]
   rt_e3: [0.115, 0.0, 0.0]
   # feature_offsets order must match vision point numbering:
-  # point1=[0,0,0], point2=rt_e1, point3=rt_e2, point4 placeholder.
+  # N=2 requires at least the first 2 offsets; N=4 requires all 4 offsets.
+  # point1=[0,0,0], point2=rt_e1, point3=rt_e2, point4=rt_e3.
   feature_offsets:
     - [0.0, 0.0, 0.0]
     - [0.06, -0.055, 0.0]

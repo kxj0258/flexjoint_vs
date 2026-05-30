@@ -2,6 +2,6 @@
 
 constexpr int kLegacyFeaturePoints = 3;
 constexpr int kLegacyImageCoords = 2 * kLegacyFeaturePoints;
+constexpr int kMinFeaturePoints = 2;
 constexpr int kMaxFeaturePoints = 4;
 constexpr int kMaxImageCoords = 2 * kMaxFeaturePoints;
-

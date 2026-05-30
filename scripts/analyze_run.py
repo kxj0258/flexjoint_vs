@@ -35,6 +35,7 @@ CONTROL_COLUMNS = [
     "state_tau_s",
     "state_tau_f_c",
 ]
+SUPPORTED_FEATURE_COUNTS = (2, 3, 4)
 
 REQUIRED_COLUMNS = [
     "frame_index",
@@ -65,6 +66,7 @@ class RunData:
     desired: np.ndarray
     feature_count: int
     image_columns: List[str]
+    radius_columns: List[str]
     image_tolerance_px: float
     exit_reason: str
     t: np.ndarray
@@ -208,16 +210,16 @@ def feature_count_from_config(config: Dict[str, Any], desired: Sequence[Any],
     configured = nested_get(config, ["vision", "feature_count"])
     if configured is not None:
         count = int(configured)
-        if count not in (3, 4):
+        if count not in SUPPORTED_FEATURE_COUNTS:
             raise ValueError(
-                f"{config_file} vision.feature_count must be 3 or 4, got {count}."
+                f"{config_file} vision.feature_count must be 2, 3, or 4, got {count}."
             )
     else:
         count = len(desired) // 2
-    if count not in (3, 4):
+    if count not in SUPPORTED_FEATURE_COUNTS:
         raise ValueError(
             f"{config_file} desired_coords imply {count} feature points; "
-            "only 3 or 4 are supported."
+            "only 2, 3, or 4 are supported."
         )
     if len(desired) != 2 * count:
         raise ValueError(
@@ -232,6 +234,16 @@ def image_columns_for_count(feature_count: int) -> List[str]:
     for point_idx in range(feature_count):
         columns.extend([f"img_u{point_idx + 1}", f"img_v{point_idx + 1}"])
     return columns
+
+
+def radius_columns_for_count(df: pd.DataFrame, feature_count: int) -> List[str]:
+    img_radius = [f"img_r{point_idx + 1}" for point_idx in range(feature_count)]
+    legacy_radius = [f"radius{point_idx + 1}" for point_idx in range(feature_count)]
+    if all(column in df.columns for column in img_radius):
+        return img_radius
+    if all(column in df.columns for column in legacy_radius):
+        return legacy_radius
+    return []
 
 
 def desired_from_config(config: Dict[str, Any], config_file: Path) -> tuple[np.ndarray, int]:
@@ -272,9 +284,10 @@ def load_run(run_dir: str | Path) -> RunData:
     config = load_yaml(config_file)
     desired, feature_count = desired_from_config(config, config_file)
     image_columns = image_columns_for_count(feature_count)
+    radius_columns = radius_columns_for_count(df, feature_count)
 
     require_columns(df, [*REQUIRED_COLUMNS, *image_columns], data_file)
-    for column in [*REQUIRED_COLUMNS, *image_columns]:
+    for column in [*REQUIRED_COLUMNS, *image_columns, *radius_columns]:
         if column != "safety_stop_reason":
             numeric_column(df, column, data_file)
 
@@ -304,6 +317,7 @@ def load_run(run_dir: str | Path) -> RunData:
         desired=desired,
         feature_count=feature_count,
         image_columns=image_columns,
+        radius_columns=radius_columns,
         image_tolerance_px=image_tolerance_px,
         exit_reason=parse_exit_reason(summary_file),
         t=t,
@@ -380,6 +394,16 @@ def compute_metrics(run: RunData) -> Dict[str, Any]:
     final_point_errors = (
         run.point_error_norms[last_idx].tolist() if last_idx is not None else None
     )
+    radius_stats: Dict[str, Any] = {}
+    for point_idx, column in enumerate(run.radius_columns, start=1):
+        values = run.df[column].to_numpy(dtype=float)
+        finite = values[np.isfinite(values)]
+        if finite.size:
+            radius_stats[f"img_r{point_idx}"] = {
+                "mean_px": float(np.mean(finite)),
+                "min_px": float(np.min(finite)),
+                "max_px": float(np.max(finite)),
+            }
 
     return {
         "run_dir": str(run.run_dir),
@@ -409,6 +433,7 @@ def compute_metrics(run: RunData) -> Dict[str, Any]:
         "max_abs_motor_velocity_estimation_error_rad_s": safe_max_abs(velocity_error),
         "vision_valid_ratio": float(np.mean(run.vision_mask)),
         "feedback_valid_ratio": float(np.mean(run.feedback_mask)),
+        "radius_stats_px": radius_stats or None,
     }
 
 
@@ -694,6 +719,7 @@ def write_summary(
         f"| Max abs motor velocity estimation error (rad/s) | {format_metric(metrics['max_abs_motor_velocity_estimation_error_rad_s'])} |",
         f"| Vision valid ratio | {format_metric(metrics['vision_valid_ratio'])} |",
         f"| Feedback valid ratio | {format_metric(metrics['feedback_valid_ratio'])} |",
+        f"| Radius stats (px) | {format_metric(metrics.get('radius_stats_px'))} |",
         "",
         "## Figures",
         "",

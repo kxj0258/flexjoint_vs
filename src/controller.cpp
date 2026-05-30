@@ -16,8 +16,11 @@ float clamp(float v, float lo, float hi)
 
 int normalized_feature_count(int feature_count)
 {
-    return feature_count == kMaxFeaturePoints ? kMaxFeaturePoints
-                                              : kLegacyFeaturePoints;
+    if (feature_count < kMinFeaturePoints)
+        return kMinFeaturePoints;
+    if (feature_count > kMaxFeaturePoints)
+        return kMaxFeaturePoints;
+    return feature_count;
 }
 
 struct FeatureKinematics {
@@ -398,6 +401,9 @@ void cal_control_features(const float joint_state[2], const float* img_coord,
     }
 
     float detJR = JR.squaredNorm();
+    if (detJR < 1e-8f) {
+        detJR = 1e-8f;
+    }
     Matrix<float, 1, Dynamic> JR_p = (1.0f/detJR) * JR.transpose();
 
     float tau_s = (Mr + Jm) * (JR_p * (-Kp*y_err - Kd*dif_y))(0);

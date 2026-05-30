@@ -4,17 +4,8 @@
 
 // Control algorithms for the soft robot arm visual servoing system.
 //
-// State vector layout (26 elements, maintained by main.cpp):
-//   [0]     joint angle (rad)
-//   [1]     joint velocity (rad/s)
-//   [2..7]  image coordinates of 3 feature points (u1,v1, u2,v2, u3,v3)
-//   [8..16] adaptive parameters: theta[4], rho[5]
-//   [17..20] observer state: obs[4]
-//   [21]     integrator state qc
-//   [22]     velocity command output
-//   [23]     total torque tau
-//   [24]     slow torque tau_s
-//   [25]     fast torque tau_f_c
+// main.cpp stores control state in a typed ControlState struct. The controller
+// API receives only the slices it needs, so image coordinates can use N=2/3/4.
 
 // ControlParams holds all tunable gains loaded from the YAML config.
 // Keeping them in a struct avoids re-reading the config on every call.

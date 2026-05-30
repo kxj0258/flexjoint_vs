@@ -2,7 +2,7 @@
 
 本项目的离线分析脚本会读取每次实验目录中的 `dataFile.txt`、
 `run_config.yaml` 和 `run_summary.md`，生成图像误差、特征点轨迹、控制输入、
-观测器状态、参数变化和汇总指标。脚本支持 3/4 个视觉特征点，会根据
+观测器状态、参数变化和汇总指标。脚本支持 2/3/4 个视觉特征点，会根据
 `run_config.yaml` 中的 `vision.feature_count` 或 `vision.desired_coords`
 自动确定点数。
 
@@ -171,7 +171,8 @@ python3 scripts/compare_runs.py data/experiments/example_manifest.yaml --out dat
 ## 图像误差和收敛指标
 
 图像误差来自 `dataFile.txt` 中的 `img_uN/img_vN` 与 `run_config.yaml` 中的
-`vision.desired_coords`。RMS 图像误差按特征点数量 N 归一化：
+`vision.desired_coords`。新日志还包含 `img_r1 ... img_rN` 半径列，分析脚本会
+在存在这些列时记录半径统计。RMS 图像误差按特征点数量 N 归一化：
 
 ```text
 sqrt(sum_i((u_i-u_di)^2 + (v_i-v_di)^2) / N)

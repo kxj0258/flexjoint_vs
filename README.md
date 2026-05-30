@@ -228,7 +228,7 @@ cd build
 ./camera_feature_test ../config/robot_config.yaml
 ```
 
-主窗口提供 `dp x10`、`min_dist`、`param1`、`param2`、`min_radius`、`max_radius`、`blur`、`sigma x10`、`equalize` 等 trackbar，可实时优化 Hough 圆检测。Linux 下还会打开 `camera_controls` 窗口，自动列出 V4L2 暴露的可写控制项，例如亮度、对比度、饱和度、白平衡、gamma、gain、sharpness、曝光等。终端会周期性打印三枚特征圆的图像坐标和半径，输出顺序与主控制器一致：中等半径、最大半径、最小半径。
+主窗口提供 `dp x10`、`min_dist`、`param1`、`param2`、`min_radius`、`max_radius`、`blur`、`sigma x10`、`equalize` 等 trackbar，可实时优化 Hough 圆检测。Linux 下还会打开 `camera_controls` 窗口，自动列出 V4L2 暴露的可写控制项，例如亮度、对比度、饱和度、白平衡、gamma、gain、sharpness、曝光等。终端会周期性打印 `feature_count` 个特征圆的图像坐标和半径，输出顺序与主控制器一致。
 
 可用 `--video` 指定录制输出文件；不指定时，按 `v` 开始录制会自动生成 `data/videos/camera_feature_test_YYYYmmdd_HHMMSS.mp4`。录制内容为当前带圆检测标注的画面。
 
@@ -396,6 +396,7 @@ control:
 vision:
   feature_count: 3
   desired_coords: [264.5, 96.5, 298.5, 166.5, 174.5, 144.5]
+  # feature_count=2 时为 [u1,v1, u2,v2]（4 个数）
   # feature_count=3 时为 [u1,v1, u2,v2, u3,v3]（6 个数）
   # feature_count=4 时为 [u1,v1, ..., u4,v4]（8 个数）
   save_path: "data/frames/"   # 主程序图像帧保存路径（相对于项目目录）
@@ -410,12 +411,11 @@ vision:
   equalize_hist: false        # 是否对灰度图做直方图均衡
 ```
 
-`feature_count` 只支持 `3` 或 `4`，不写时默认 `3`，旧配置可继续使用。
-3 点模式保持历史编号顺序：中半径、最大半径、最小半径。4 点模式按半径从
-小到大排序后输出：点1=次小半径，点2=次大半径，点3=最小半径，点4=最大
-半径。`desired_coords` 必须按这个排序顺序填写，也就是
-`[u_second_smallest,v_second_smallest,
-u_second_largest,v_second_largest, u_smallest,v_smallest, u_largest,v_largest]`。
+`feature_count` 支持 `2`、`3` 或 `4`，不写时默认 `3`，旧配置可继续使用。
+2 点模式按半径升序：点1=小圆，点2=大圆。3 点模式保持历史编号顺序：
+点1=中半径，点2=最大半径，点3=最小半径。4 点模式保持当前顺序：
+点1=次小半径，点2=次大半径，点3=最小半径，点4=最大半径。
+`desired_coords` 必须按这个检测排序顺序填写。
 
 ### motor_protocol — 电机测试协议配置
 
@@ -495,8 +495,10 @@ robot:
 
 `feature_offsets` 的顺序必须和视觉编号、`vision.desired_coords` 顺序一致。
 旧配置没有 `feature_offsets` 时，3 点模式会自动使用 `[0,0,0]`、`rt_e1`、
-`rt_e2`。`feature_count=4` 时必须提供至少 4 个三维偏置；样例中的第 4 个
-偏置只是占位，需要按实际 4 点标定板替换。
+`rt_e2`。`feature_count=2` 时必须提供至少 2 个三维偏置；`feature_count=4`
+时必须提供至少 4 个三维偏置。第 4 个偏置在
+`config/robot_config.yaml` 的 `robot.feature_offsets` 第 4 项修改，需要按实际
+4 点标定板替换。
 
 零点换算公式：
 
@@ -549,8 +551,8 @@ encoder_zero_offset_deg = single_turn_deg - q0 * 180 / pi
 `FeatureExtractor` 类封装摄像头采集和圆检测；底层圆检测逻辑由 `feature_detection` 公共模块提供，主程序和 `camera_feature_test` 使用同一套检测代码：
 - 修复了原代码中 `VideoCapture` 按值传递的 bug（OpenCV `VideoCapture` 不可廉价拷贝）
 - 使用现代 OpenCV 常量（`cv::COLOR_BGR2GRAY`、`cv::HOUGH_GRADIENT` 等，替代已废弃的 `CV_` 前缀常量）
-- 每帧检测到的圆按半径排序，输出中圆、最大圆、最小圆的坐标和半径
-- 支持 `vision.feature_count=3/4`；控制器会按检测排序使用对应 `desired_coords` 和 `robot.feature_offsets`
+- 每帧检测到的圆按 `feature_count` 对应规则排序，输出坐标和半径
+- 支持 `vision.feature_count=2/3/4`；控制器会按检测排序使用对应 `desired_coords` 和 `robot.feature_offsets`
 - 自动保存带标注的图像帧到 `data/frames/`
 
 ### `motor_client` — 电机命令与反馈
@@ -578,13 +580,13 @@ encoder_zero_offset_deg = single_turn_deg - q0 * 180 / pi
 
 ### `dataFile.txt`
 
-每个控制周期写入一行 CSV，包含原始反馈、图像点、26 维控制状态、发送到电机的速度指令和有效性标志。主要控制状态列含义如下：
+每个控制周期写入一行 CSV，包含原始反馈、图像点、半径、动态控制状态、发送到电机的速度指令和有效性标志。顶层图像列为 `img_u1/img_v1 ... img_uN/img_vN`，半径列为 `img_r1 ... img_rN`。主要控制状态列含义如下：
 
 | 列索引 | 含义 |
 |--------|------|
 | `state_joint_angle_rad` | 控制状态中的关节角（rad） |
 | `state_joint_velocity_rad_s` | 控制状态中的关节角速度（rad/s） |
-| `state_img_u1`–`state_img_v3` | 兼容旧布局的前三个特征点图像坐标（像素） |
+| `state_img_u1`–`state_img_vN` | 控制状态中的 N 个特征点图像坐标；3 点模式列名和旧布局保持兼容 |
 | `state_theta_0`–`state_theta_3` | 自适应相机参数 theta[4] |
 | `state_rho_0`–`state_rho_4` | 鲁棒项参数 rho[5] |
 | `state_obs_0`–`state_obs_3` | 观测器状态 obs[4] |

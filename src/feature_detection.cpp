@@ -8,8 +8,8 @@ namespace {
 
 bool valid_feature_count(int feature_count)
 {
-    return feature_count == kLegacyFeaturePoints ||
-           feature_count == kMaxFeaturePoints;
+    return feature_count >= kMinFeaturePoints &&
+           feature_count <= kMaxFeaturePoints;
 }
 
 bool circle_center_less(const FeatureCircle& a, const FeatureCircle& b)
@@ -109,6 +109,12 @@ bool select_feature_circles(const std::vector<FeatureCircle>& circles,
 
     std::vector<FeatureCircle> sorted = circles;
     std::sort(sorted.begin(), sorted.end(), radius_asc_then_center);
+
+    if (feature_count == kMinFeaturePoints) {
+        selected[0] = sorted.front(); // smallest radius
+        selected[1] = sorted.back();  // largest radius
+        return true;
+    }
 
     selected[0] = sorted[1];                 // second-smallest radius
     selected[1] = sorted[sorted.size() - 2]; // second-largest radius

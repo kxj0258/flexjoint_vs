@@ -121,6 +121,20 @@ struct RunSummary {
     std::vector<std::string> warnings;
 };
 
+struct ControlState {
+    float joint_angle = 0.0f;
+    float joint_velocity = 0.0f;
+    std::array<float, kMaxImageCoords> img = {};
+    std::array<float, 4> theta = {};
+    std::array<float, 5> rho = {};
+    std::array<float, 4> obs = {};
+    float qc = 0.0f;
+    float velocity = 0.0f;
+    float tau = 0.0f;
+    float tau_s = 0.0f;
+    float tau_f_c = 0.0f;
+};
+
 ControllerMode parse_controller_mode(const std::string& mode)
 {
     if (mode == "proposed")
@@ -355,15 +369,11 @@ fs::path make_run_log_dir(const fs::path& root_dir,
 
 void write_data_header(std::ofstream& out, int feature_count)
 {
-    const std::array<std::string, 26> state_names = {
+    const std::array<std::string, 2> state_joint_names = {
         "state_joint_angle_rad",
-        "state_joint_velocity_rad_s",
-        "state_img_u1",
-        "state_img_v1",
-        "state_img_u2",
-        "state_img_v2",
-        "state_img_u3",
-        "state_img_v3",
+        "state_joint_velocity_rad_s"
+    };
+    const std::array<std::string, 18> state_tail_names = {
         "state_theta_0",
         "state_theta_1",
         "state_theta_2",
@@ -395,7 +405,16 @@ void write_data_header(std::ofstream& out, int feature_count)
         columns.push_back("img_u" + std::to_string(i + 1));
         columns.push_back("img_v" + std::to_string(i + 1));
     }
-    columns.insert(columns.end(), state_names.begin(), state_names.end());
+    for (int i = 0; i < feature_count; ++i)
+        columns.push_back("img_r" + std::to_string(i + 1));
+    columns.insert(columns.end(), state_joint_names.begin(),
+                   state_joint_names.end());
+    for (int i = 0; i < feature_count; ++i) {
+        columns.push_back("state_img_u" + std::to_string(i + 1));
+        columns.push_back("state_img_v" + std::to_string(i + 1));
+    }
+    columns.insert(columns.end(), state_tail_names.begin(),
+                   state_tail_names.end());
     columns.push_back("velocity_command_rad_s");
     columns.push_back("joint_cal_rad_s");
     columns.push_back("feedback_ok");
@@ -411,8 +430,8 @@ void write_data_header(std::ofstream& out, int feature_count)
 }
 
 void write_data_row(std::ofstream& out, int frame_index, double elapsed_s,
-                    double unix_s, const float state[26], const float* img_pos,
-                    int feature_count,
+                    double unix_s, const ControlState& state,
+                    const float* img_pos, const int* radius, int feature_count,
                     double velocity_cmd, double joint_cal, bool feedback_ok,
                     bool vision_ok, const std::string& safety_stop_reason)
 {
@@ -420,12 +439,27 @@ void write_data_row(std::ofstream& out, int frame_index, double elapsed_s,
     out << frame_index << ','
         << elapsed_s << ','
         << unix_s << ','
-        << state[0] << ','
-        << state[1];
+        << state.joint_angle << ','
+        << state.joint_velocity;
     for (int i = 0; i < 2 * feature_count; ++i)
         out << ',' << img_pos[i];
-    for (int i = 0; i < 26; ++i)
-        out << ',' << state[i];
+    for (int i = 0; i < feature_count; ++i)
+        out << ',' << (radius ? radius[i] : 0);
+    out << ',' << state.joint_angle
+        << ',' << state.joint_velocity;
+    for (int i = 0; i < 2 * feature_count; ++i)
+        out << ',' << state.img[i];
+    for (float value : state.theta)
+        out << ',' << value;
+    for (float value : state.rho)
+        out << ',' << value;
+    for (float value : state.obs)
+        out << ',' << value;
+    out << ',' << state.qc
+        << ',' << state.velocity
+        << ',' << state.tau
+        << ',' << state.tau_s
+        << ',' << state.tau_f_c;
     out << ',' << velocity_cmd
         << ',' << joint_cal
         << ',' << (feedback_ok ? 1 : 0)
@@ -477,12 +511,34 @@ double image_rms_error(const float* img_pos, const float* desired,
     return std::sqrt(sum_sq / static_cast<double>(feature_count));
 }
 
-void copy_legacy_image_state(float state[26], const float* img_pos,
-                             int feature_count)
+void copy_image_state(ControlState& state, const float* img_pos,
+                      int feature_count)
 {
-    const int coords = std::min(kLegacyImageCoords, 2 * feature_count);
+    const int coords = std::min(kMaxImageCoords, 2 * feature_count);
     for (int i = 0; i < coords; ++i)
-        state[2 + i] = img_pos[i];
+        state.img[i] = img_pos[i];
+}
+
+void fill_para_slow(const ControlState& state, float para_slow[9])
+{
+    for (int i = 0; i < 4; ++i)
+        para_slow[i] = state.theta[i];
+    for (int i = 0; i < 5; ++i)
+        para_slow[4 + i] = state.rho[i];
+}
+
+void apply_para_update(ControlState& state, const float para_update[17])
+{
+    for (int i = 0; i < 4; ++i)
+        state.theta[i] = para_update[i];
+    for (int i = 0; i < 5; ++i)
+        state.rho[i] = para_update[4 + i];
+    for (int i = 0; i < 4; ++i)
+        state.obs[i] = para_update[9 + i];
+    state.qc = para_update[13];
+    state.tau = para_update[14];
+    state.tau_s = para_update[15];
+    state.tau_f_c = para_update[16];
 }
 
 std::string format_circles_for_log(const float* img_pos, const int* radius,
@@ -775,15 +831,15 @@ void write_summary_file(const RunSummary& summary, const AppConfig& cfg,
     }
 }
 
-void update_summary_last_values(RunSummary& summary, const float state[26],
+void update_summary_last_values(RunSummary& summary, const ControlState& state,
                                 const float* img_pos, int feature_count,
                                 double velocity_cmd,
                                 double joint_cal, bool feedback_ok,
                                 bool vision_ok,
                                 const std::string& safety_stop_reason)
 {
-    summary.last_joint_angle_rad = state[0];
-    summary.last_joint_velocity_rad_s = state[1];
+    summary.last_joint_angle_rad = state.joint_angle;
+    summary.last_joint_velocity_rad_s = state.joint_velocity;
     for (int i = 0; i < 2 * feature_count; ++i)
         summary.last_img[i] = img_pos[i];
     summary.last_velocity_command_rad_s = velocity_cmd;
@@ -1036,24 +1092,16 @@ int main(int argc, char* argv[])
     const float joint_va = cfg.initial_angle_rad;
     const float joint_vel_va = 0.0f;
 
-    float state[26] = {};
-    state[0] = joint_va;
-    state[1] = joint_vel_va;
-    copy_legacy_image_state(state, img_coord_va.data(), feature_count);
-    state[8] = 400.0f;
-    state[9] = 420.0f;
-    state[10] = 400.0f;
-    state[11] = 300.0f;
-    state[12] = 0.0001f;
-    state[13] = 0.0001f;
-    state[14] = 0.0001f;
-    state[15] = 0.0001f;
-    state[16] = 0.0001f;
-    state[17] = joint_va;
-    state[18] = joint_va;
-    state[19] = 0.0f;
-    state[20] = 0.0f;
-    state[21] = joint_va;
+    std::array<int, kMaxFeaturePoints> last_radius = rad_va;
+
+    ControlState state;
+    state.joint_angle = joint_va;
+    state.joint_velocity = joint_vel_va;
+    copy_image_state(state, img_coord_va.data(), feature_count);
+    state.theta = {400.0f, 420.0f, 400.0f, 300.0f};
+    state.rho = {0.0001f, 0.0001f, 0.0001f, 0.0001f, 0.0001f};
+    state.obs = {joint_va, joint_va, 0.0f, 0.0f};
+    state.qc = joint_va;
 
     for (int i = 0; i < 2 * feature_count; ++i)
         summary.last_img[i] = last_img_pos[i];
@@ -1086,8 +1134,8 @@ int main(int argc, char* argv[])
             break;
         }
 
-        float angle_rad = state[0];
-        float vel_rad_s = state[1];
+        float angle_rad = state.joint_angle;
+        float vel_rad_s = state.joint_velocity;
         bool feedback_ok_for_log = have_feedback && feedback_fail_streak == 0;
         ++frame_counter;
 
@@ -1152,8 +1200,8 @@ int main(int argc, char* argv[])
 
         feedback_ok_for_log = have_feedback && feedback_fail_streak == 0;
 
-        state[0] = angle_rad;
-        state[1] = vel_rad_s;
+        state.joint_angle = angle_rad;
+        state.joint_velocity = vel_rad_s;
 
         float log_img_pos[kMaxImageCoords] = {};
         for (int i = 0; i < 2 * feature_count; ++i)
@@ -1162,13 +1210,13 @@ int main(int argc, char* argv[])
         if (cfg.task.max_feedback_failures > 0 &&
             feedback_fail_streak >= cfg.task.max_feedback_failures) {
             const bool stop_ok = motor.send_velocity_rad_s(0.0);
-            state[22] = 0.0f;
+            state.velocity = 0.0f;
             if (!stop_ok)
                 warn(summary, "failed to send zero velocity after feedback failures");
             const std::string safety_reason = "feedback_failures";
             write_data_row(dataFile, frame_counter, elapsed_s,
                            unix_time_seconds(loop_wall), state, log_img_pos,
-                           feature_count,
+                           last_radius.data(), feature_count,
                            0.0, 0.0, false, false, safety_reason);
             update_summary_last_values(summary, state, log_img_pos,
                                        feature_count, 0.0, 0.0, false, false,
@@ -1177,13 +1225,11 @@ int main(int argc, char* argv[])
             break;
         }
 
-        float joint_state[2] = { state[0], state[1] };
+        float joint_state[2] = { state.joint_angle, state.joint_velocity };
         float para_slow[9];
-        for (int i = 0; i < 9; i++) {
-            para_slow[i] = state[8 + i];
-        }
-        float obs[4] = { state[17], state[18], state[19], state[20] };
-        float q_c = state[21];
+        fill_para_slow(state, para_slow);
+        float obs[4] = { state.obs[0], state.obs[1], state.obs[2], state.obs[3] };
+        float q_c = state.qc;
         float ydif[kMaxImageCoords] = {};
 
         float img_pos[kMaxImageCoords] = {};
@@ -1208,7 +1254,7 @@ int main(int argc, char* argv[])
         if (!vision_ok) {
             ++vision_fail_streak;
             const bool stop_ok = motor.send_velocity_rad_s(0.0);
-            state[22] = 0.0f;
+            state.velocity = 0.0f;
             if (!stop_ok)
                 warn(summary, "failed to send zero velocity after vision failure");
             const std::string safety_reason = "vision_extract_failed";
@@ -1218,7 +1264,7 @@ int main(int argc, char* argv[])
                     stop_ok ? "" : " (send failed)");
             write_data_row(dataFile, frame_counter, elapsed_s,
                            unix_time_seconds(loop_wall), state, log_img_pos,
-                           feature_count,
+                           last_radius.data(), feature_count,
                            0.0, 0.0, feedback_ok_for_log, false,
                            safety_reason);
             update_summary_last_values(summary, state, log_img_pos,
@@ -1235,6 +1281,8 @@ int main(int argc, char* argv[])
         vision_fail_streak = 0;
         for (int i = 0; i < 2 * feature_count; ++i)
             log_img_pos[i] = img_pos[i];
+        for (int i = 0; i < feature_count; ++i)
+            last_radius[i] = rad_new[i];
         if (controller_mode_uses_baseline_pd(controller_mode) &&
             have_previous_img &&
             std::isfinite(previous_img_time_s) &&
@@ -1333,19 +1381,9 @@ int main(int argc, char* argv[])
             warn(summary, "failed to send velocity command");
         // printf("angle=%.4f rad  vel=%.4f rad/s\n", angle_rad, vel_rad_s);
 
-        copy_legacy_image_state(state, img_pos, feature_count);
-        for (int i = 0; i < 9; i++) {
-            state[8 + i] = para_update[i];
-        }
-        state[17] = para_update[9];
-        state[18] = para_update[10];
-        state[19] = para_update[11];
-        state[20] = para_update[12];
-        state[21] = para_update[13];
-        state[22] = velocity;
-        state[23] = para_update[14];
-        state[24] = para_update[15];
-        state[25] = para_update[16];
+        copy_image_state(state, img_pos, feature_count);
+        apply_para_update(state, para_update);
+        state.velocity = velocity;
 
         const auto annotated_video_start = Clock::now();
         write_video_frame(annotated_video, annotated_frame, cfg.vision.fps,
@@ -1356,7 +1394,7 @@ int main(int argc, char* argv[])
 
         write_data_row(dataFile, frame_counter, elapsed_s,
                        unix_time_seconds(loop_wall), state, img_pos,
-                       feature_count,
+                       rad_new, feature_count,
                        velocity, joint_cal, feedback_ok_for_log, true,
                        safety_reason);
         update_summary_last_values(summary, state, img_pos, feature_count,
