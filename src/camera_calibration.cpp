@@ -1,10 +1,14 @@
 #include "app_config.hpp"
 #include "camera_utils.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
+#include <ctime>
 #include <exception>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -16,6 +20,7 @@
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 #include <yaml-cpp/yaml.h>
@@ -34,10 +39,17 @@ struct Options {
     bool        extrinsic_only = false;
 };
 
+struct CapturedSample {
+    std::string image_file;
+    std::string annotated_file;
+    std::vector<cv::Point2f> corners;
+};
+
 void print_usage(const char* argv0)
 {
     printf("Usage: %s <config.yaml> [--cols N] [--rows N] [--square M]\n", argv0);
     printf("       [--samples N] [--output PATH] [--intrinsics PATH] [--extrinsic-only]\n");
+    printf("Captured images are saved by default under data/camera_calibration_samples/YYYYmmdd_HHMMSS/\n");
     printf("Keys: SPACE capture, k calibrate intrinsics, e solve extrinsics, s save, q/ESC quit\n");
 }
 
@@ -261,6 +273,110 @@ bool create_parent_directory(const std::string& path)
     return slash == std::string::npos || create_directories(path.substr(0, slash));
 }
 
+std::tm local_time(std::time_t t)
+{
+    std::tm tm_value = {};
+#ifdef _WIN32
+    localtime_s(&tm_value, &t);
+#else
+    localtime_r(&t, &tm_value);
+#endif
+    return tm_value;
+}
+
+std::string format_time(const char* fmt)
+{
+    const std::time_t now = std::time(nullptr);
+    const std::tm tm_now = local_time(now);
+    std::ostringstream oss;
+    oss << std::put_time(&tm_now, fmt);
+    return oss.str();
+}
+
+std::string yaml_quote(const std::string& text)
+{
+    std::ostringstream oss;
+    oss << '"';
+    for (char ch : text) {
+        if (ch == '\\' || ch == '"')
+            oss << '\\';
+        oss << ch;
+    }
+    oss << '"';
+    return oss.str();
+}
+
+std::string sample_filename(int index, bool annotated)
+{
+    std::ostringstream oss;
+    oss << "sample_" << std::setw(4) << std::setfill('0') << index;
+    if (annotated)
+        oss << "_annotated";
+    oss << ".png";
+    return oss.str();
+}
+
+bool save_sample_images(const std::string& sample_dir, int index,
+                        const cv::Mat& raw_frame, const cv::Size& board_size,
+                        const std::vector<cv::Point2f>& corners,
+                        CapturedSample& sample)
+{
+    sample.image_file = sample_filename(index, false);
+    sample.annotated_file = sample_filename(index, true);
+    sample.corners = corners;
+
+    const std::string image_path = sample_dir + "/" + sample.image_file;
+    const std::string annotated_path = sample_dir + "/" + sample.annotated_file;
+    if (!cv::imwrite(image_path, raw_frame))
+        return false;
+
+    cv::Mat annotated = raw_frame.clone();
+    cv::drawChessboardCorners(annotated, board_size, corners, true);
+    return cv::imwrite(annotated_path, annotated);
+}
+
+bool write_samples_yaml(const std::string& path, const Options& opts,
+                        const cv::Size& image_size,
+                        const std::string& calibration_output,
+                        const std::string& created_at,
+                        const std::vector<CapturedSample>& samples)
+{
+    if (!create_parent_directory(path))
+        return false;
+
+    std::ofstream out(path);
+    if (!out.is_open())
+        return false;
+
+    out << "board_cols: " << opts.board_cols << "\n";
+    out << "board_rows: " << opts.board_rows << "\n";
+    out << "square_size_m: " << std::setprecision(10)
+        << opts.square_size_m << "\n";
+    out << "image_width: " << image_size.width << "\n";
+    out << "image_height: " << image_size.height << "\n";
+    out << "calibration_output: " << yaml_quote(calibration_output) << "\n";
+    out << "created_at: " << yaml_quote(created_at) << "\n";
+    if (samples.empty()) {
+        out << "samples: []\n";
+        return true;
+    }
+
+    out << "samples:\n";
+    out << std::fixed << std::setprecision(6);
+    for (const CapturedSample& sample : samples) {
+        out << "  - image: " << yaml_quote(sample.image_file) << "\n";
+        out << "    annotated: " << yaml_quote(sample.annotated_file) << "\n";
+        out << "    corners: [";
+        for (size_t i = 0; i < sample.corners.size(); ++i) {
+            if (i != 0)
+                out << ", ";
+            out << sample.corners[i].x << ", " << sample.corners[i].y;
+        }
+        out << "]\n";
+    }
+    return true;
+}
+
 bool save_calibration(const std::string& path, const Options& opts,
                       const cv::Size& image_size, const cv::Mat& camera_matrix,
                       const cv::Mat& dist_coeffs, double rms_error,
@@ -361,6 +477,30 @@ int main(int argc, char* argv[])
         }
     }
 
+    cv::Size image_size(app.vision.width, app.vision.height);
+    const std::string project_dir = find_app_project_dir(opts.config_path);
+    const std::string output_path = opts.output_path_from_cli
+        ? opts.output_path
+        : resolve_app_path(project_dir, opts.output_path);
+    const std::string sample_dir =
+        resolve_app_path(project_dir, "data/camera_calibration_samples/" +
+                                      format_time("%Y%m%d_%H%M%S"));
+    const std::string samples_yaml_path = sample_dir + "/samples.yaml";
+    const std::string created_at = format_time("%Y-%m-%d %H:%M:%S");
+    std::vector<CapturedSample> captured_samples;
+
+    if (!create_directories(sample_dir)) {
+        fprintf(stderr, "Cannot create sample directory: %s\n", sample_dir.c_str());
+        return 1;
+    }
+    if (!write_samples_yaml(samples_yaml_path, opts, image_size, output_path,
+                            created_at, captured_samples)) {
+        fprintf(stderr, "Cannot write sample metadata: %s\n",
+                samples_yaml_path.c_str());
+        return 1;
+    }
+    printf("Calibration samples will be saved to %s\n", sample_dir.c_str());
+
     cv::VideoCapture cap;
     if (!open_configured_camera(cap, app.vision, "camera_calibration"))
         return 1;
@@ -370,16 +510,11 @@ int main(int argc, char* argv[])
     std::vector<std::vector<cv::Point3f>> object_samples;
     std::vector<std::vector<cv::Point2f>> image_samples;
     std::vector<cv::Point2f> latest_corners;
-    cv::Size image_size(app.vision.width, app.vision.height);
     cv::Mat rvec;
     cv::Mat tvec;
     bool have_extrinsics = false;
     double rms_error = 0.0;
     bool calibrated_this_run = false;
-    const std::string project_dir = find_app_project_dir(opts.config_path);
-    const std::string output_path = opts.output_path_from_cli
-        ? opts.output_path
-        : resolve_app_path(project_dir, opts.output_path);
 
     const std::string window = "camera_calibration";
     cv::namedWindow(window, cv::WINDOW_NORMAL);
@@ -393,6 +528,7 @@ int main(int argc, char* argv[])
             fprintf(stderr, "Empty frame\n");
             break;
         }
+        const cv::Mat raw_frame = frame.clone();
         image_size = frame.size();
 
         cv::Mat gray;
@@ -451,10 +587,27 @@ int main(int argc, char* argv[])
         if (key == 27 || key == 'q')
             break;
         if ((key == ' ' || key == 'c') && found) {
+            CapturedSample sample;
+            const int sample_index =
+                static_cast<int>(captured_samples.size()) + 1;
+            if (!save_sample_images(sample_dir, sample_index, raw_frame,
+                                    board_size, corners, sample)) {
+                fprintf(stderr, "Failed to save sample images in %s\n",
+                        sample_dir.c_str());
+                continue;
+            }
             image_samples.push_back(corners);
             object_samples.push_back(board_points);
+            captured_samples.push_back(sample);
+            if (!write_samples_yaml(samples_yaml_path, opts, image_size,
+                                    output_path, created_at,
+                                    captured_samples)) {
+                fprintf(stderr, "Failed to update %s\n",
+                        samples_yaml_path.c_str());
+            }
             calibrated_this_run = false;
-            printf("Captured sample %zu\n", image_samples.size());
+            printf("Captured sample %zu: %s\n", image_samples.size(),
+                   sample.image_file.c_str());
         }
         if (key == 'k') {
             const bool ok = calibrate_intrinsics(object_samples, image_samples,

@@ -28,7 +28,7 @@ camera_controls:
 control:
   K1: 1.42
   B: 0.000049
-  K2: 0.001
+  K2: 0.0002
   Gamma: 0.0001
   K4: 1.0
   eps: 0.1
@@ -52,12 +52,19 @@ vision:
   #   N=3: legacy order, point1=middle radius, point2=largest, point3=smallest
   #   N=4: point1=second-smallest, point2=second-largest,
   #        point3=smallest, point4=largest
-  feature_count: 4
-  # feature_count=2 example: desired_coords: [u1, v1, u2, v2]
+  
+  # feature_count: 3
   # desired_coords: [266.5, 120.5, 301.5, 203.5, 172.5, 162.5]
   # desired_coords: [223.5, 95.5, 246.5, 183.5, 122.5, 120.5]
-  desired_coords: [257.5,107.5, 281.5, 194.5, 160.6,134.5, 198.5,208.5]
-  # desired_coords: [229.5, 92.5, 243.5, 181.5, 129.5, 107.5, 158.5, 187.5]
+
+  feature_count: 4
+  desired_coords: [273.5,106.5, 291.5, 195.5, 173.6,128.5, 207.5,205.5]
+  # desired_coords: [230.5, 81.5, 234.5, 172.5, 129.5, 83.5, 148.5, 168.5]
+
+  # feature_count: 2
+  # desired_coords: [258.5,107.5, 199.5,209.5]
+  # # desired_coords: [201.5,73.5, 119.5,158.5]
+
   save_path: "data/frames/"
   hough_dp: 1.02
   hough_min_dist: 30.0
@@ -131,13 +138,35 @@ robot:
     - [0.06, -0.055, 0.0]
     - [0.075, 0.075, 0.0]
     - [0.115, 0.0, 0.0]
+
+  # feature_offsets:
+  #   - [0.0, 0.0, 0.0]
+  #   - [0.115, 0.0, 0.0]
+
   initial_angle_rad: -0.185
   encoder_zero_offset_deg: 10.621692
-  # fx, fy, cx, cy
-  camera_intrinsics: [487.05, 487.05, 338.23, 231.89]
-  # row-major 3x4 extrinsic matrix (rows 0-2, cols 0-3)
+  # # fx, fy, cx, cy
+  # camera_intrinsics: [487.05, 487.05, 338.23, 231.89]
+  # Initial online estimate theta in controller order: fx, cx, fy, cy.
+  camera_intrinsics_estimate_initial: [360.0, 370.0, 360.0, 320.0]
+  # # row-major 3x4 extrinsic matrix (rows 0-2, cols 0-3)
+  # camera_extrinsics: [
+  #   -0.0561, -0.9962, -0.0673,  0.0015,
+  #    0.9981, -0.0577,  0.0208, -0.4200,
+  #   -0.0246, -0.0660,  0.9975,  0.4523
+  # ]
+
+  camera_intrinsics: [480.151, 480.616, 330.058, 224.507]
   camera_extrinsics: [
-    -0.0561, -0.9962, -0.0673,  0.0015,
-     0.9981, -0.0577,  0.0208, -0.4200,
-    -0.0246, -0.0660,  0.9975,  0.4523
+    -0.0661212, -0.995662, -0.065466, 0.001213, 
+    0.967088, -0.0477917, -0.249912, -0.126373, 
+    0.245699, -0.0798359, 0.966053, 0.571329
   ]
+
+
+  # camera_intrinsics: [480.151, 480.616, 330.058, 224.507]
+  # camera_extrinsics: [
+  #   -0.995662,  -0.065466,  -0.0661212,  0.193798,
+  #   -0.0477917, -0.249912,   0.967088,  -0.141806,
+  #   -0.0798359,  0.966053,   0.245699,   0.683901
+  # ]

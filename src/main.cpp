@@ -1098,7 +1098,12 @@ int main(int argc, char* argv[])
     state.joint_angle = joint_va;
     state.joint_velocity = joint_vel_va;
     copy_image_state(state, img_coord_va.data(), feature_count);
-    state.theta = {400.0f, 420.0f, 400.0f, 300.0f};
+    state.theta = {
+        cfg.ctrl.theta_initial[0],
+        cfg.ctrl.theta_initial[1],
+        cfg.ctrl.theta_initial[2],
+        cfg.ctrl.theta_initial[3]
+    };
     state.rho = {0.0001f, 0.0001f, 0.0001f, 0.0001f, 0.0001f};
     state.obs = {joint_va, joint_va, 0.0f, 0.0f};
     state.qc = joint_va;

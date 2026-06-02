@@ -40,6 +40,8 @@ struct ControlParams {
     };
     // Camera intrinsics (fx, fy, cx, cy)
     float fx = 487.05f, fy = 487.05f, cx = 338.23f, cy = 231.89f;
+    // Initial online estimate theta in controller order (fx, cx, fy, cy)
+    float theta_initial[4] = {400.0f, 420.0f, 400.0f, 300.0f};
     // Camera extrinsics (row-major 3x4, last row implicit [0,0,0,1])
     float cam_ex[12] = {
         -0.0561f, -0.9962f, -0.0673f, 0.0015f,

@@ -29,6 +29,7 @@ from analyze_run import (
     default_experiment_root,
     resolve_path,
     select_file_dialog,
+    set_time_axis_from_zero,
 )
 
 
@@ -68,7 +69,7 @@ def default_output_dir(manifest: Dict[str, Any], manifest_path: Path) -> Path:
 
 def save_figure(fig: plt.Figure, out_dir: Path, stem: str) -> List[Path]:
     paths = []
-    for suffix in ("png", "pdf"):
+    for suffix in ("png", "pdf", "svg"):
         path = out_dir / f"{stem}.{suffix}"
         fig.savefig(path, bbox_inches="tight")
         paths.append(path)
@@ -84,6 +85,9 @@ def plot_compare_image_error(runs: Sequence[Dict[str, Any]], out_dir: Path) -> L
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("RMS image error (pixel)")
     ax.legend(loc="best")
+    set_time_axis_from_zero(
+        ax, np.concatenate([item["run_data"].t for item in runs])
+    )
     return save_figure(fig, out_dir, "fig_compare_image_error")
 
 
@@ -136,6 +140,9 @@ def plot_compare_control_inputs(runs: Sequence[Dict[str, Any]], out_dir: Path) -
     axes[1].set_xlabel("Time (s)")
     axes[1].set_ylabel(r"$\tau$")
     axes[1].legend(loc="best")
+    set_time_axis_from_zero(
+        axes, np.concatenate([item["run_data"].t for item in runs])
+    )
     return save_figure(fig, out_dir, "fig_compare_control_inputs")
 
 
@@ -156,13 +163,15 @@ def write_summary(
         "",
         "## Metrics",
         "",
-        "| Experiment | Exit | Duration (s) | Initial RMS (px) | Final RMS (px) | Convergence (s) | Max abs u_cmd (rad/s) | Mean abs u_cmd (rad/s) | RMS fast state | Max fast state |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "Fast-state metrics use Zf1 in Nm and Zf2 in Nm/s; values are logged controller-state values without analysis-time rescaling.",
+        "",
+        "| Experiment | Exit | Duration (s) | Initial RMS (px) | Final RMS (px) | Convergence (s) | Max abs u_cmd (rad/s) | Mean abs u_cmd (rad/s) | RMS Zf1 (Nm) | Max abs Zf1 (Nm) | RMS Zf2 (Nm/s) | Max abs Zf2 (Nm/s) |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for item in runs:
         metrics = item["metrics"]
         lines.append(
-            "| {label} | {exit_reason} | {duration} | {initial} | {final} | {conv} | {max_cmd} | {mean_cmd} | {rms_fast} | {max_fast} |".format(
+            "| {label} | {exit_reason} | {duration} | {initial} | {final} | {conv} | {max_cmd} | {mean_cmd} | {rms_zf1} | {max_zf1} | {rms_zf2} | {max_zf2} |".format(
                 label=item["label"],
                 exit_reason=metrics.get("exit_reason", "unknown"),
                 duration=format_metric(metrics.get("duration_s")),
@@ -171,8 +180,10 @@ def write_summary(
                 conv=format_metric(metrics.get("convergence_time_s")),
                 max_cmd=format_metric(metrics.get("max_abs_velocity_command_rad_s")),
                 mean_cmd=format_metric(metrics.get("mean_abs_velocity_command_rad_s")),
-                rms_fast=format_metric(metrics.get("rms_fast_state_norm")),
-                max_fast=format_metric(metrics.get("max_fast_state_norm")),
+                rms_zf1=format_metric(metrics.get("rms_zf1_nm")),
+                max_zf1=format_metric(metrics.get("max_abs_zf1_nm")),
+                rms_zf2=format_metric(metrics.get("rms_zf2_nm_s")),
+                max_zf2=format_metric(metrics.get("max_abs_zf2_nm_s")),
             )
         )
     lines.extend(["", "## Figures", ""])

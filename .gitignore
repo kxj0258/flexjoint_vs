@@ -13,6 +13,7 @@
 /soft_robot_vs
 /data/log/
 /data/log_before/
+/data/camera_calibration_samples/
 *.pyc
 __pycache__/
 
@@ -41,3 +42,6 @@ __pycache__/
 Thumbs.db
 *~
 *.swp
+
+
+scripts/update_log_data.py

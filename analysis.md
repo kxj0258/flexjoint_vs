@@ -58,13 +58,14 @@ python3 scripts/analyze_run.py --run data/log/<timestamp>
 
 默认输出到 `<run>/analysis/`：
 
-- `fig_image_errors.png/.pdf`
-- `fig_image_trajectories.png/.pdf`
-- `fig_observer_states.png/.pdf`
-- `fig_motor_actual_vs_estimated.png/.pdf`
-- `fig_parameters_theta_rho.png/.pdf`
-- `fig_fast_states.png/.pdf`
-- `fig_control_inputs.png/.pdf`
+- `fig_image_errors.png/.pdf/.svg`
+- `fig_image_trajectories.png/.pdf/.svg`
+- `fig_observer_states.png/.pdf/.svg`
+- `fig_motor_actual_vs_estimated.png/.pdf/.svg`
+- `fig_parameters_theta_rho.png/.pdf/.svg`
+- `fig_parameters_theta_rho_estimates_only.png/.pdf/.svg`
+- `fig_fast_states.png/.pdf/.svg`
+- `fig_control_inputs.png/.pdf/.svg`
 - `metrics.json`
 - `analysis_summary.md`
 
@@ -162,9 +163,9 @@ python3 scripts/compare_runs.py data/experiments/example_manifest.yaml --out dat
 
 `compare_runs.py` 会生成：
 
-- `fig_compare_image_error.png/.pdf`
-- `fig_compare_trajectories.png/.pdf`
-- `fig_compare_control_inputs.png/.pdf`
+- `fig_compare_image_error.png/.pdf/.svg`
+- `fig_compare_trajectories.png/.pdf/.svg`
+- `fig_compare_control_inputs.png/.pdf/.svg`
 - `compare_metrics.json`
 - `compare_summary.md`
 

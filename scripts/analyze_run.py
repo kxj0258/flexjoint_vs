@@ -363,6 +363,49 @@ def safe_mean_abs(values: np.ndarray) -> Optional[float]:
     return float(np.mean(np.abs(finite)))
 
 
+def safe_rms(values: np.ndarray) -> Optional[float]:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return float(np.sqrt(np.mean(finite**2)))
+
+
+def camera_theta_true_from_config(
+    config: Dict[str, Any], config_file: Path, warn: bool = True
+) -> Optional[np.ndarray]:
+    intrinsics = nested_get(config, ["robot", "camera_intrinsics"])
+    if intrinsics is None:
+        if warn:
+            print(
+                f"Warning: {config_file} does not contain robot.camera_intrinsics; "
+                "skipping camera parameter true-value overlay.",
+                file=sys.stderr,
+            )
+        return None
+    if not isinstance(intrinsics, (list, tuple)) or len(intrinsics) < 4:
+        if warn:
+            print(
+                f"Warning: {config_file} robot.camera_intrinsics must contain "
+                "[fx, fy, cx, cy]; skipping camera parameter true-value overlay.",
+                file=sys.stderr,
+            )
+        return None
+    try:
+        fx = float(intrinsics[0])
+        fy = float(intrinsics[1])
+        cx = float(intrinsics[2])
+        cy = float(intrinsics[3])
+    except (TypeError, ValueError):
+        if warn:
+            print(
+                f"Warning: {config_file} robot.camera_intrinsics contains "
+                "non-numeric values; skipping camera parameter true-value overlay.",
+                file=sys.stderr,
+            )
+        return None
+    return np.asarray([fx, cx, fy, cy], dtype=float)
+
+
 def compute_metrics(run: RunData) -> Dict[str, Any]:
     valid_image_idx = np.flatnonzero(run.vision_mask & np.isfinite(run.rms_image_error))
     first_idx = int(valid_image_idx[0]) if valid_image_idx.size else None
@@ -383,13 +426,13 @@ def compute_metrics(run: RunData) -> Dict[str, Any]:
         velocity_error = np.asarray([], dtype=float)
 
     velocity_command = run.df["velocity_command_rad_s"].to_numpy(dtype=float)
-    fast_angle = run.df["state_obs_0"].to_numpy(dtype=float) - run.df[
+    zf1 = run.df["state_obs_0"].to_numpy(dtype=float) - run.df[
         "state_obs_1"
     ].to_numpy(dtype=float)
-    fast_velocity = run.df["state_obs_2"].to_numpy(dtype=float) - run.df[
+    zf2 = run.df["state_obs_2"].to_numpy(dtype=float) - run.df[
         "state_obs_3"
     ].to_numpy(dtype=float)
-    fast_norm = np.sqrt(fast_angle**2 + fast_velocity**2)
+    fast_norm = np.sqrt(zf1**2 + zf2**2)
     duration = float(run.t[-1] - run.t[0]) if len(run.t) else 0.0
     final_point_errors = (
         run.point_error_norms[last_idx].tolist() if last_idx is not None else None
@@ -423,6 +466,10 @@ def compute_metrics(run: RunData) -> Dict[str, Any]:
         ),
         "max_abs_velocity_command_rad_s": safe_max_abs(velocity_command),
         "mean_abs_velocity_command_rad_s": safe_mean_abs(velocity_command),
+        "rms_zf1_nm": safe_rms(zf1),
+        "max_abs_zf1_nm": safe_max_abs(zf1),
+        "rms_zf2_nm_s": safe_rms(zf2),
+        "max_abs_zf2_nm_s": safe_max_abs(zf2),
         "rms_fast_state_norm": (
             float(np.sqrt(np.mean(fast_norm[np.isfinite(fast_norm)] ** 2)))
             if np.any(np.isfinite(fast_norm))
@@ -484,7 +531,7 @@ def configure_style(paper_style: bool) -> None:
 
 def save_figure(fig: plt.Figure, out_dir: Path, stem: str) -> List[Path]:
     paths = []
-    for suffix in ("png", "pdf"):
+    for suffix in ("png", "pdf", "svg"):
         path = out_dir / f"{stem}.{suffix}"
         fig.savefig(path, bbox_inches="tight")
         paths.append(path)
@@ -496,6 +543,19 @@ def masked(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
     out = values.astype(float).copy()
     out[~mask] = np.nan
     return out
+
+
+def set_time_axis_from_zero(axes: Any, t: np.ndarray) -> None:
+    finite_t = np.asarray(t, dtype=float)
+    finite_t = finite_t[np.isfinite(finite_t)]
+    if finite_t.size == 0:
+        return
+    right = float(np.max(finite_t))
+    for ax in np.atleast_1d(axes).ravel():
+        if right > 0.0:
+            ax.set_xlim(0.0, right)
+        else:
+            ax.set_xlim(left=0.0)
 
 
 def plot_image_errors(run: RunData, out_dir: Path) -> List[Path]:
@@ -521,6 +581,7 @@ def plot_image_errors(run: RunData, out_dir: Path) -> List[Path]:
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Position error (pixel)")
     ax.legend(ncol=3, loc="best")
+    set_time_axis_from_zero(ax, run.t)
     fig.tight_layout()
     return save_figure(fig, out_dir, "fig_image_errors")
 
@@ -577,6 +638,7 @@ def plot_observer_states(run: RunData, out_dir: Path) -> List[Path]:
     axes[1].set_xlabel("Time (s)")
     axes[1].set_ylabel("Velocity (rad/s)")
     axes[1].legend(loc="best")
+    set_time_axis_from_zero(axes, run.t)
     fig.tight_layout()
     return save_figure(fig, out_dir, "fig_observer_states")
 
@@ -608,16 +670,41 @@ def plot_motor_actual_vs_estimated(run: RunData, out_dir: Path) -> List[Path]:
     axes[1, 1].set_xlabel("Time (s)")
     axes[1, 1].set_ylabel("Velocity error (rad/s)")
 
+    set_time_axis_from_zero(axes, run.t)
     fig.tight_layout()
     return save_figure(fig, out_dir, "fig_motor_actual_vs_estimated")
 
 
-def plot_parameters(run: RunData, out_dir: Path) -> List[Path]:
+def plot_parameter_figure(
+    run: RunData,
+    out_dir: Path,
+    stem: str,
+    theta_true: Optional[np.ndarray],
+) -> List[Path]:
     fig, axes = plt.subplots(2, 1, figsize=(7.0, 5.2), sharex=True)
     for i, column in enumerate(THETA_COLUMNS):
-        axes[0].plot(run.t, run.df[column], label=rf"$\theta_{i + 1}$")
+        label = (
+            rf"$\hat{{\theta}}_{i + 1}$"
+            if theta_true is not None
+            else rf"$\theta_{i + 1}$"
+        )
+        linestyle = "--" if theta_true is not None else "-"
+        line, = axes[0].plot(
+            run.t,
+            run.df[column],
+            linestyle=linestyle,
+            label=label,
+        )
+        if theta_true is not None:
+            axes[0].axhline(
+                theta_true[i],
+                color=line.get_color(),
+                linestyle="-",
+                linewidth=line.get_linewidth(),
+                label=rf"$\theta_{i + 1}$",
+            )
     axes[0].set_ylabel("Camera parameter estimate")
-    axes[0].legend(ncol=4, loc="best")
+    axes[0].legend(ncol=4 if theta_true is None else 2, loc="best")
 
     for i, column in enumerate(RHO_COLUMNS):
         axes[1].plot(run.t, run.df[column], label=rf"$\rho_{i + 1}$")
@@ -625,27 +712,45 @@ def plot_parameters(run: RunData, out_dir: Path) -> List[Path]:
     axes[1].set_ylabel("Unknown parameter estimate")
     axes[1].ticklabel_format(axis="y", style="sci", scilimits=(-3, 3))
     axes[1].legend(ncol=5, loc="best")
+    set_time_axis_from_zero(axes, run.t)
     fig.tight_layout()
-    return save_figure(fig, out_dir, "fig_parameters_theta_rho")
+    return save_figure(fig, out_dir, stem)
+
+
+def plot_parameters(run: RunData, out_dir: Path) -> List[Path]:
+    theta_true = camera_theta_true_from_config(run.config, run.config_file)
+    paths: List[Path] = []
+    paths.extend(
+        plot_parameter_figure(
+            run, out_dir, "fig_parameters_theta_rho", theta_true
+        )
+    )
+    paths.extend(
+        plot_parameter_figure(
+            run, out_dir, "fig_parameters_theta_rho_estimates_only", None
+        )
+    )
+    return paths
 
 
 def plot_fast_states(run: RunData, out_dir: Path) -> List[Path]:
-    z_angle = run.df["state_obs_0"].to_numpy(dtype=float) - run.df[
+    zf1 = run.df["state_obs_0"].to_numpy(dtype=float) - run.df[
         "state_obs_1"
     ].to_numpy(dtype=float)
-    z_velocity = run.df["state_obs_2"].to_numpy(dtype=float) - run.df[
+    zf2 = run.df["state_obs_2"].to_numpy(dtype=float) - run.df[
         "state_obs_3"
     ].to_numpy(dtype=float)
 
     fig, axes = plt.subplots(1, 2, figsize=(8.4, 3.4), sharex=True)
-    axes[0].plot(run.t, z_angle, color="0.1")
+    axes[0].plot(run.t, zf1, color="0.1")
     axes[0].axhline(0.0, color="0.45", linewidth=0.8)
     axes[0].set_xlabel("Time (s)")
-    axes[0].set_ylabel(r"$z_{f,angle}$ (rad)")
-    axes[1].plot(run.t, z_velocity, color="0.1")
+    axes[0].set_ylabel(r"$z_{f1}$ (Nm)")
+    axes[1].plot(run.t, zf2, color="0.1")
     axes[1].axhline(0.0, color="0.45", linewidth=0.8)
     axes[1].set_xlabel("Time (s)")
-    axes[1].set_ylabel(r"$z_{f,velocity}$ (rad/s)")
+    axes[1].set_ylabel(r"$z_{f2}$ (Nm/s)")
+    set_time_axis_from_zero(axes, run.t)
     fig.tight_layout()
     return save_figure(fig, out_dir, "fig_fast_states")
 
@@ -663,6 +768,7 @@ def plot_control_inputs(run: RunData, out_dir: Path) -> List[Path]:
     axes[1].set_xlabel("Time (s)")
     axes[1].set_ylabel("Controller internal input")
     axes[1].legend(loc="best")
+    set_time_axis_from_zero(axes, run.t)
     fig.tight_layout()
     return save_figure(fig, out_dir, "fig_control_inputs")
 
@@ -686,7 +792,14 @@ def write_summary(
         "state_obs_0/state_obs_2 are treated as rigid-link angle/velocity "
         "estimates, and state_obs_1/state_obs_3 as motor angle/velocity "
         "estimates. The direct motor comparison therefore uses "
-        "joint_angle_rad vs state_obs_1 and joint_velocity_rad_s vs state_obs_3."
+        "joint_angle_rad vs state_obs_1 and joint_velocity_rad_s vs state_obs_3. "
+        "The fast-state plot keeps the logged controller-state values without "
+        "rescaling: z_f1 = state_obs_0 - state_obs_1 is labeled Nm, and "
+        "z_f2 = state_obs_2 - state_obs_3 is labeled Nm/s. The camera parameter "
+        "overlay plot compares estimated theta with true theta from "
+        "robot.camera_intrinsics by mapping YAML [fx, fy, cx, cy] to controller "
+        "theta [fx, cx, fy, cy] when available; an estimates-only companion "
+        "figure is also written."
     )
     lines = [
         "# flexjoint_vs Analysis Summary",
@@ -713,8 +826,10 @@ def write_summary(
         f"| Convergence time (s) | {format_metric(metrics['convergence_time_s'])} |",
         f"| Max abs velocity command (rad/s) | {format_metric(metrics['max_abs_velocity_command_rad_s'])} |",
         f"| Mean abs velocity command (rad/s) | {format_metric(metrics['mean_abs_velocity_command_rad_s'])} |",
-        f"| RMS fast-state norm | {format_metric(metrics['rms_fast_state_norm'])} |",
-        f"| Max fast-state norm | {format_metric(metrics['max_fast_state_norm'])} |",
+        f"| RMS Zf1 (Nm) | {format_metric(metrics['rms_zf1_nm'])} |",
+        f"| Max abs Zf1 (Nm) | {format_metric(metrics['max_abs_zf1_nm'])} |",
+        f"| RMS Zf2 (Nm/s) | {format_metric(metrics['rms_zf2_nm_s'])} |",
+        f"| Max abs Zf2 (Nm/s) | {format_metric(metrics['max_abs_zf2_nm_s'])} |",
         f"| Max abs motor angle estimation error (rad) | {format_metric(metrics['max_abs_motor_angle_estimation_error_rad'])} |",
         f"| Max abs motor velocity estimation error (rad/s) | {format_metric(metrics['max_abs_motor_velocity_estimation_error_rad_s'])} |",
         f"| Vision valid ratio | {format_metric(metrics['vision_valid_ratio'])} |",

@@ -193,6 +193,17 @@ AppConfig load_app_config(const std::string& path)
     c.ctrl.cx = intr[2];
     c.ctrl.cy = intr[3];
 
+    if (const auto theta_initial = y["robot"]["camera_intrinsics_estimate_initial"]) {
+        auto values = theta_initial.as<std::vector<float>>();
+        if (values.size() != 4) {
+            throw std::runtime_error(
+                "robot.camera_intrinsics_estimate_initial must contain exactly "
+                "4 numbers in controller theta order [fx, cx, fy, cy]");
+        }
+        for (int i = 0; i < 4; ++i)
+            c.ctrl.theta_initial[i] = values[static_cast<size_t>(i)];
+    }
+
     auto ex = y["robot"]["camera_extrinsics"].as<std::vector<float>>();
     for (int i = 0; i < 12; i++)
         c.ctrl.cam_ex[i] = ex[i];

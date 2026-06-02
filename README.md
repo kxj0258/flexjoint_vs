@@ -24,6 +24,7 @@ flexjoint_vs/
 │   ├── main.cpp                # 主程序：初始化、控制主循环
 │   ├── camera_feature_test.cpp # 摄像头实时检测与交互调参
 │   ├── camera_calibration.cpp  # 棋盘格相机内参/外参标定
+│   ├── camera_calibration_eval.cpp # 标定样本离线重投影误差评估
 │   ├── motor_test.cpp          # 电机交互测试程序
 │   ├── app_config.cpp          # 配置加载实现
 │   ├── feature_detection.cpp   # Hough 圆检测实现
@@ -101,6 +102,7 @@ make -j4
 - `build/flexjoint_vs`：视觉伺服主程序
 - `build/camera_feature_test`：摄像头实时检测/调参程序
 - `build/camera_calibration`：相机内参/外参标定程序
+- `build/camera_calibration_eval`：标定样本离线重投影评估程序
 - `build/motor_test`：电机交互测试程序
 
 ### Windows
@@ -113,7 +115,7 @@ cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.c
 cmake --build build --config Release
 ```
 
-编译成功后会生成 `flexjoint_vs.exe`、`camera_feature_test.exe`、`camera_calibration.exe`、`motor_test.exe`。Visual Studio 多配置生成器通常位于 `build\Release\`；Ninja 等单配置生成器通常位于 `build\`。
+编译成功后会生成 `flexjoint_vs.exe`、`camera_feature_test.exe`、`camera_calibration.exe`、`camera_calibration_eval.exe`、`motor_test.exe`。Visual Studio 多配置生成器通常位于 `build\Release\`；Ninja 等单配置生成器通常位于 `build\`。
 
 ---
 
@@ -155,6 +157,11 @@ experiment:
 - `proposed_no_fast`：消融试验；仍使用 `cal_joint_vel()`，但在分发层将快子系统增益 `K4` 临时置 0。
 - `baseline_pd`：工程基线对比；使用固定内参的 `cal_control()` PD 视觉伺服控制器。
 - `baseline_pd_no_fast`：PD 基线并禁用快子系统振动抑制。
+
+`proposed` / `proposed_no_fast` 中在线估计的相机内参初值来自
+`robot.camera_intrinsics_estimate_initial`，顺序就是控制器内部使用的
+`[fx, cx, fy, cy]`。`robot.camera_intrinsics` 仍表示标定/真实内参，YAML
+顺序为 `[fx, fy, cx, cy]`，供相机矩阵、标定结果和离线分析真值使用。
 
 `config/` 下提供了可直接运行的实验配置文件。`robot_config.yaml` 是唯一的
 公共参数来源；其它实验配置通过 `extends: robot_config.yaml` 继承它，只覆盖
@@ -211,6 +218,13 @@ python3 scripts/compare_runs.py data/experiments/example_manifest.yaml
 `analyze_log_folder.py` 会自动扫描所选 log 文件夹下每个包含 `dataFile.txt`
 和 `run_config.yaml` 的子目录，逐个生成单次分析，并在 log 根目录下输出
 `batch_analysis/batch_summary.md`、`batch_metrics.csv` 和 `batch_metrics.json`。
+单次分析中的相机参数图会读取该 run 的 `run_config.yaml`，把
+`robot.camera_intrinsics: [fx, fy, cx, cy]` 映射为控制器内部
+`theta = [fx, cx, fy, cy]`，并用同色水平实线叠加真实值；估计曲线仍来自
+`state_theta_0`-`state_theta_3`。如果日志配置缺少 `robot.camera_intrinsics`，
+分析脚本会提示并保留原估计曲线。快系统图和汇总表中 `Zf1` 表示弹性力矩
+瞬态偏差，单位 `N·m`；`Zf2` 表示扭振力矩变化率，单位 `N·m/s`。分析脚本
+只更新显示单位，不对日志中的快系统状态数值做额外缩放。
 不带参数运行时会弹出文件夹选择框：
 
 ```bash
@@ -266,6 +280,13 @@ cd build
 即使程序是从 `build/` 目录启动也不会写到 `build/data/`。显式指定
 `--output PATH` 时按给定路径保存。
 
+每次启动标定程序时，会默认创建项目目录下的
+`data/camera_calibration_samples/YYYYmmdd_HHMMSS/` 样本目录，并在终端打印
+该路径。按 `Space` 或 `c` 成功采集棋盘格后，会保存原始图
+`sample_0001.png`、角点标注图 `sample_0001_annotated.png`，并持续更新
+同目录下的 `samples.yaml`，其中记录棋盘规格、图像尺寸、标定输出路径和
+每张样本的角点坐标。
+
 快捷键：
 
 - `Space` 或 `c`：采集一帧棋盘格样本
@@ -283,6 +304,23 @@ cd build
   --extrinsic-only \
   --intrinsics ../data/camera_calibration.yaml
 ```
+
+离线评估标定结果时，可以直接传入标定 YAML。未指定样本目录时，程序会自动
+使用 `data/camera_calibration_samples/` 下最新的时间戳目录；未指定输出目录
+时，结果保存到该样本目录的 `eval/` 子目录。
+
+```bash
+./camera_calibration_eval ../data/camera_calibration.yaml
+
+# 或显式指定样本和输出目录
+./camera_calibration_eval ../data/camera_calibration.yaml \
+  --samples ../data/camera_calibration_samples/20260101_120000 \
+  --output ../data/camera_eval
+```
+
+评估结果包含 `evaluation.yaml`、`reprojection_errors.csv`、
+`overlay_0001.png` 和 `undistorted_0001.png` 等文件。Overlay 图中会同时显示
+检测角点、重投影点和误差连线，便于检查重投影误差来源。
 
 ### 电机交互测试
 
@@ -490,6 +528,7 @@ robot:
   initial_angle_rad: -0.185       # 初始关节角（弧度）
   encoder_zero_offset_deg: 134.539  # 编码器零点偏移（度）
   camera_intrinsics: [487.05, 487.05, 338.23, 231.89]  # fx, fy, cx, cy
+  camera_intrinsics_estimate_initial: [400.0, 420.0, 400.0, 300.0]  # fx, cx, fy, cy
   camera_extrinsics: [...]        # 相机外参矩阵（行主序 3×4）
 ```
 
@@ -499,6 +538,10 @@ robot:
 时必须提供至少 4 个三维偏置。第 4 个偏置在
 `config/robot_config.yaml` 的 `robot.feature_offsets` 第 4 项修改，需要按实际
 4 点标定板替换。
+
+`camera_intrinsics` 和 `camera_intrinsics_estimate_initial` 的顺序不同：
+前者是 OpenCV/标定常用顺序 `[fx, fy, cx, cy]`；后者直接写入控制器在线
+估计状态 `theta`，顺序为 `[fx, cx, fy, cy]`。
 
 零点换算公式：
 
@@ -595,6 +638,14 @@ encoder_zero_offset_deg = single_turn_deg - q0 * 180 / pi
 | `state_tau` | 总力矩 tau |
 | `state_tau_s` | 慢动态力矩 tau_s |
 | `state_tau_f_c` | 快动态力矩 tau_f_c |
+
+离线分析中，相机参数估计曲线按控制器内部顺序
+`theta = [fx, cx, fy, cy]` 绘制；真实值来自日志配置
+`robot.camera_intrinsics: [fx, fy, cx, cy]`，因此会映射为
+`[fx, cx, fy, cy]` 后叠加。快系统图使用日志中的观测器状态差构造
+`Zf1 = state_obs_0 - state_obs_1` 和 `Zf2 = state_obs_2 - state_obs_3`；
+`Zf1` 的物理意义为弹性力矩瞬态偏差，单位 `N·m`，`Zf2` 为扭振力矩变化率，
+单位 `N·m/s`。
 
 ### `data/frames/`
 
